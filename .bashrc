@@ -33,6 +33,7 @@ alias 1='ping -c 100000000 1.1.1.1'
 alias ms='msfconsole'
 alias gem='gemini --yolo'
 alias gitc='git add -A && git commit'
+alias installclaude='curl -fsSL https://claude.ai/install.sh | bash'
 
 # Navigation
 alias ..='cd ..'
