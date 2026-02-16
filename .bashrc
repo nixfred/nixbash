@@ -34,6 +34,7 @@ alias ms='msfconsole'
 alias gem='gemini --yolo'
 alias gitc='git add -A && git commit'
 alias installclaude='curl -fsSL https://claude.ai/install.sh | bash'
+alias installgemini='npm install -g @google/gemini-cli'
 
 # Navigation
 alias ..='cd ..'
