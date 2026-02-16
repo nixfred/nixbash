@@ -5,13 +5,7 @@ Fast, clean bash environment for Linux servers. One command to set up aliases, p
 ## Quick Install
 
 ```bash
-curl -sL https://raw.githubusercontent.com/nixfred/nixbash/main/install.sh | bash
-```
-
-Then activate:
-
-```bash
-source ~/.bashrc
+curl -sL https://raw.githubusercontent.com/nixfred/nixbash/main/install.sh | bash && source ~/.bashrc
 ```
 
 ## What You Get

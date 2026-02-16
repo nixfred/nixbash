@@ -2,7 +2,7 @@
 # NixBash Installer - Fast Linux Server Shell Environment
 # https://github.com/nixfred/nixbash
 #
-# Usage: curl -sL https://raw.githubusercontent.com/nixfred/nixbash/main/install.sh | bash
+# Usage: curl -sL https://raw.githubusercontent.com/nixfred/nixbash/main/install.sh | bash && source ~/.bashrc
 #
 # Fully non-interactive. No prompts. Safe for scripted installs.
 

@@ -1,6 +1,6 @@
 # NixBash - Fast Linux Server Shell Environment
 # https://github.com/nixfred/nixbash
-# One-liner install: curl -sL https://raw.githubusercontent.com/nixfred/nixbash/main/install.sh | bash
+# One-liner install: curl -sL https://raw.githubusercontent.com/nixfred/nixbash/main/install.sh | bash && source ~/.bashrc
 
 # Skip for non-interactive shells
 [[ $- != *i* ]] && return
