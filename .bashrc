@@ -16,6 +16,12 @@
 # SYSTEM ALIASES
 ######################################################################
 
+# FIX: clear aliases that were converted to functions in this version.
+# Without this, `source ~/.bashrc` in a shell that loaded the OLD .bashrc
+# fails because bash expands the old alias before parsing the new function
+# definition, e.g. `si()` becomes `sudo apt install -y()` -> syntax error.
+unalias reboot si aa df du psg 2>/dev/null
+
 # Package management (works with or without sudo)
 # FIX: function instead of alias -- alias fell through if sudo existed but failed (expired creds, policy, etc.)
 reboot() {
