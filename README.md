@@ -21,7 +21,8 @@ The interactive setup walks you through:
 - Set hostname and timezone
 - Import SSH keys from GitHub or paste manually
 - Install Docker, Claude Code, Tailscale
-- Install 50+ sysadmin tools (monitoring, networking, security)
+- Install essential tools (git, vim, tmux, nmap, rsync, fail2ban, etc.)
+- Optionally install extras (monitoring, fun, security, hardware tools)
 - Configure fail2ban, zram, unattended-upgrades
 - Install NixBash shell environment (always included)
 

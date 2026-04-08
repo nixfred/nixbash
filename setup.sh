@@ -83,9 +83,20 @@ CREATE_USER="n"
 if ask_yn "Create a new sudo user?"; then
     CREATE_USER="y"
     NEW_USER=$(ask "Username")
-    NEW_PASS=$(ask_secret "Password for ${NEW_USER}")
-    if [ -z "$NEW_USER" ] || [ -z "$NEW_PASS" ]; then
-        fail "Username and password cannot be empty"
+    while true; do
+        NEW_PASS=$(ask_secret "Password for ${NEW_USER}")
+        NEW_PASS2=$(ask_secret "Confirm password")
+        if [ -z "$NEW_PASS" ]; then
+            warn "Password cannot be empty — try again"
+        elif [ "$NEW_PASS" != "$NEW_PASS2" ]; then
+            warn "Passwords do not match — try again"
+        else
+            ok "Password confirmed"
+            break
+        fi
+    done
+    if [ -z "$NEW_USER" ]; then
+        fail "Username cannot be empty"
     fi
 fi
 
@@ -130,7 +141,8 @@ if [ "$INSTALL_TAILSCALE" = "y" ]; then
     TS_KEY=$(ask "Tailscale auth key (leave blank to authenticate manually)" "")
 fi
 
-if ask_yn "Install full tool suite (50+ packages)?" "y"; then INSTALL_TOOLS="y"; else INSTALL_TOOLS="n"; fi
+if ask_yn "Install essential tools (20 packages: git, vim, tmux, nmap, rsync, etc.)?" "y"; then INSTALL_ESSENTIALS="y"; else INSTALL_ESSENTIALS="n"; fi
+if ask_yn "Install extras (monitoring, fun, security — 30+ more packages)?" "n"; then INSTALL_EXTRAS="y"; else INSTALL_EXTRAS="n"; fi
 
 # ── Confirmation ──────────────────────────────────────────────────
 echo ""
@@ -145,7 +157,8 @@ echo -e "  Timezone:   ${GREEN}${NEW_TZ}${RESET}"
 echo -e "  Docker:     $([ "$INSTALL_DOCKER" = "y" ] && echo "${GREEN}yes${RESET}" || echo "${YELLOW}no${RESET}")"
 echo -e "  Claude:     $([ "$INSTALL_CLAUDE" = "y" ] && echo "${GREEN}yes${RESET}" || echo "${YELLOW}no${RESET}")"
 echo -e "  Tailscale:  $([ "$INSTALL_TAILSCALE" = "y" ] && echo "${GREEN}yes${RESET}" || echo "${YELLOW}no${RESET}")"
-echo -e "  Full tools: $([ "$INSTALL_TOOLS" = "y" ] && echo "${GREEN}yes${RESET}" || echo "${YELLOW}no${RESET}")"
+echo -e "  Essentials: $([ "$INSTALL_ESSENTIALS" = "y" ] && echo "${GREEN}yes${RESET}" || echo "${YELLOW}no${RESET}")"
+echo -e "  Extras:     $([ "$INSTALL_EXTRAS" = "y" ] && echo "${GREEN}yes${RESET}" || echo "${YELLOW}no${RESET}")"
 echo -e "  NixBash:    ${GREEN}yes (always)${RESET}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo ""
@@ -163,7 +176,8 @@ fi
 TOTAL_STEPS=4  # update, hostname/tz, nixbash, cleanup — always present
 [ "$CREATE_USER" = "y" ] && TOTAL_STEPS=$((TOTAL_STEPS + 1))
 [ "$SSH_METHOD" != "none" ] && TOTAL_STEPS=$((TOTAL_STEPS + 1))
-[ "$INSTALL_TOOLS" = "y" ] && TOTAL_STEPS=$((TOTAL_STEPS + 1))
+[ "$INSTALL_ESSENTIALS" = "y" ] && TOTAL_STEPS=$((TOTAL_STEPS + 1))
+[ "$INSTALL_EXTRAS" = "y" ] && TOTAL_STEPS=$((TOTAL_STEPS + 1))
 [ "$INSTALL_DOCKER" = "y" ] && TOTAL_STEPS=$((TOTAL_STEPS + 1))
 [ "$INSTALL_TAILSCALE" = "y" ] && TOTAL_STEPS=$((TOTAL_STEPS + 1))
 [ "$INSTALL_CLAUDE" = "y" ] && TOTAL_STEPS=$((TOTAL_STEPS + 1))
@@ -262,24 +276,21 @@ if [ "$SSH_METHOD" != "none" ]; then
     ok "SSH key configured for ${TARGET_USER}"
 fi
 
-# ── Full tool suite ───────────────────────────────────────────────
-if [ "$INSTALL_TOOLS" = "y" ]; then
-    next_step "Full Tool Suite"
-    info "Installing 50+ sysadmin packages — this will take a few minutes..."
+# ── Essential tools ───────────────────────────────────────────────
+if [ "$INSTALL_ESSENTIALS" = "y" ]; then
+    next_step "Essential Tools"
+    info "Installing core sysadmin packages..."
     echo ""
 
-    TOOL_GROUPS=(
-        "monitoring:htop atop iotop iftop glances bmon dstat vnstat inxi sysbench stress"
-        "networking:nmap mtr traceroute tcpdump net-tools iputils-ping autossh ansiweather"
-        "security:fail2ban tor proxychains iptables"
-        "filesystem:ncdu tree rsync pv lsof sshfs cifs-utils rclone"
-        "editors:vim nano mc tmux irssi"
-        "utilities:git figlet lolcat cowsay multitail unzip wget python3-pip cmatrix"
-        "services:openssh-server unattended-upgrades zram-tools nala"
-        "hardware:pciutils smartmontools lm-sensors iptraf-ng ansible"
+    ESSENTIAL_GROUPS=(
+        "editors:git vim nano tmux mc"
+        "networking:nmap mtr traceroute tcpdump net-tools iputils-ping"
+        "filesystem:ncdu tree rsync pv lsof unzip wget rclone"
+        "security:fail2ban iptables openssh-server"
+        "system:nala unattended-upgrades zram-tools python3-pip"
     )
 
-    for group_entry in "${TOOL_GROUPS[@]}"; do
+    for group_entry in "${ESSENTIAL_GROUPS[@]}"; do
         group_name="${group_entry%%:*}"
         group_pkgs="${group_entry#*:}"
         info "  📦 ${group_name}: ${group_pkgs}"
@@ -310,7 +321,33 @@ if [ "$INSTALL_TOOLS" = "y" ]; then
         ok "zram swap enabled"
     fi
 
-    ok "Full tool suite installed"
+    ok "Essential tools installed"
+fi
+
+# ── Extras ────────────────────────────────────────────────────────
+if [ "$INSTALL_EXTRAS" = "y" ]; then
+    next_step "Extra Tools"
+    info "Installing extras (monitoring, fun, security, hardware)..."
+    echo ""
+
+    EXTRA_GROUPS=(
+        "monitoring:atop iotop iftop glances bmon dstat vnstat inxi iptraf-ng"
+        "security:tor proxychains"
+        "hardware:pciutils smartmontools lm-sensors"
+        "remote:sshfs cifs-utils autossh ansible"
+        "fun:figlet lolcat cowsay cmatrix"
+    )
+
+    for group_entry in "${EXTRA_GROUPS[@]}"; do
+        group_name="${group_entry%%:*}"
+        group_pkgs="${group_entry#*:}"
+        info "  📦 ${group_name}: ${group_pkgs}"
+        # shellcheck disable=SC2086
+        apt-get install -y $group_pkgs 2>&1 | grep -E "^(Setting up|is already|E: Unable)" | head -20 || true
+    done
+
+    echo ""
+    ok "Extra tools installed"
 fi
 
 # ── Docker ────────────────────────────────────────────────────────
@@ -395,7 +432,8 @@ echo -e "  ✅ System updated and upgraded"
 echo -e "  ✅ Hostname: ${GREEN}$(hostname)${RESET} | Timezone: ${GREEN}${NEW_TZ}${RESET}"
 [ "$CREATE_USER" = "y" ] && echo -e "  ✅ User created: ${GREEN}${NEW_USER}${RESET} (sudo NOPASSWD)"
 [ "$SSH_METHOD" != "none" ] && echo -e "  ✅ SSH key imported"
-[ "$INSTALL_TOOLS" = "y" ] && echo -e "  ✅ 50+ sysadmin tools installed"
+[ "$INSTALL_ESSENTIALS" = "y" ] && echo -e "  ✅ Essential tools installed"
+[ "$INSTALL_EXTRAS" = "y" ] && echo -e "  ✅ Extra tools installed"
 [ "$INSTALL_DOCKER" = "y" ] && echo -e "  ✅ Docker: ${GREEN}$(docker --version 2>/dev/null | head -1 || echo 'installed')${RESET}"
 [ "$INSTALL_TAILSCALE" = "y" ] && echo -e "  ✅ Tailscale: ${GREEN}$(tailscale ip -4 2>/dev/null || echo 'installed — run tailscale up')${RESET}"
 echo -e "  ✅ NixBash shell environment"
