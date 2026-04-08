@@ -1,12 +1,30 @@
 # NixBash
 
-Fast, clean bash environment for Linux servers. One command to set up aliases, prompt, system banner, and modern CLI tools on any fresh server.
+Fast, clean bash environment for Linux servers. One command to go from fresh install to fully provisioned.
 
-## Quick Install
+## Install
+
+**Automatic** — shell environment only, no prompts, safe for scripted installs:
 
 ```bash
 curl -sL https://raw.githubusercontent.com/nixfred/nixbash/main/install.sh | bash && source ~/.bashrc
 ```
+
+**Interactive** — full server provisioning with guided setup (run as root):
+
+```bash
+curl -sL https://raw.githubusercontent.com/nixfred/nixbash/main/setup.sh | sudo bash
+```
+
+The interactive setup walks you through:
+- Create a sudo user with NOPASSWD
+- Set hostname and timezone
+- Import SSH keys from GitHub or paste manually
+- Disable SSH password authentication
+- Install Docker, Claude Code, Tailscale
+- Install 50+ sysadmin tools (monitoring, networking, security)
+- Configure fail2ban, zram, unattended-upgrades
+- Install NixBash shell environment (always included)
 
 ## What You Get
 

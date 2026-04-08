@@ -10,7 +10,8 @@ NixBash is a public, single-purpose repo that bootstraps a clean bash environmen
 
 - `.bashrc` — The complete bash environment (aliases, prompt, banner, functions, tool integrations). This is the deliverable — it gets downloaded directly to `~/.bashrc` on target machines.
 - `install.sh` — Non-interactive installer. Backs up existing .bashrc, installs CLI tools via apt/dnf/pacman, downloads .bashrc. Must never prompt the user (no `read`, no `select`, no confirmations) because it's used inside automation scripts.
-- `README.md` — Contains the one-liner install command. This is the primary user interface.
+- `setup.sh` — Interactive full-server provisioning. Prompts for user creation, hostname, SSH keys, Docker, Tailscale, Claude Code, and tool suite. Runs `install.sh` at the end for the shell environment. Must be run as root. Uses `read` prompts — this is the ONLY script that is allowed to be interactive.
+- `README.md` — Contains both install commands (automatic and interactive). This is the primary user interface.
 - `LICENSE` — MIT.
 
 ## Critical Rules
