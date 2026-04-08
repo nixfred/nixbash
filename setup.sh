@@ -82,22 +82,33 @@ echo -e "${BOLD}── User Setup ──${RESET}"
 CREATE_USER="n"
 if ask_yn "Create a new sudo user?"; then
     CREATE_USER="y"
-    NEW_USER=$(ask "Username")
+    # FIX: validate username BEFORE password loop, reject dangerous characters
+    while true; do
+        NEW_USER=$(ask "Username")
+        if [ -z "$NEW_USER" ]; then
+            warn "Username cannot be empty -- try again"
+        elif [[ "$NEW_USER" =~ ^- ]]; then
+            warn "Username cannot start with a dash -- try again"
+        elif [[ "$NEW_USER" =~ [^a-zA-Z0-9._-] ]]; then
+            warn "Username can only contain letters, numbers, dots, underscores, hyphens -- try again"
+        elif [ "${#NEW_USER}" -gt 32 ]; then
+            warn "Username cannot exceed 32 characters -- try again"
+        else
+            break
+        fi
+    done
     while true; do
         NEW_PASS=$(ask_secret "Password for ${NEW_USER}")
         NEW_PASS2=$(ask_secret "Confirm password")
         if [ -z "$NEW_PASS" ]; then
-            warn "Password cannot be empty — try again"
+            warn "Password cannot be empty -- try again"
         elif [ "$NEW_PASS" != "$NEW_PASS2" ]; then
-            warn "Passwords do not match — try again"
+            warn "Passwords do not match -- try again"
         else
             ok "Password confirmed"
             break
         fi
     done
-    if [ -z "$NEW_USER" ]; then
-        fail "Username cannot be empty"
-    fi
 fi
 
 # ── Hostname ──────────────────────────────────────────────────────
@@ -190,10 +201,12 @@ echo -e "${BOLD}${GREEN}🚀 Starting setup — ${TOTAL_STEPS} steps to go...${R
 
 # ── System update ─────────────────────────────────────────────────
 next_step "System Update"
+# FIX: pipefail + apt | tail kills script if apt fails. Use subshell to isolate.
+# FIX: DEBIAN_FRONTEND prevents dpkg interactive config prompts from hanging.
 info "Updating package lists..."
-apt-get update 2>&1 | tail -3
+(apt-get update 2>&1 || true) | tail -3
 info "Upgrading installed packages..."
-apt-get upgrade -y 2>&1 | tail -5
+DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::="--force-confold" upgrade -y 2>&1 | tail -5 || true
 ok "System packages are up to date"
 
 # ── Hostname & Timezone ──────────────────────────────────────────
@@ -201,7 +214,12 @@ next_step "Hostname & Timezone"
 if [ "$NEW_HOST" != "$CURRENT_HOST" ]; then
     info "Changing hostname: ${CURRENT_HOST} → ${NEW_HOST}"
     hostnamectl set-hostname "$NEW_HOST" 2>/dev/null || echo "$NEW_HOST" > /etc/hostname
-    sed -i "s/127.0.1.1.*/127.0.1.1\t${NEW_HOST}/" /etc/hosts 2>/dev/null || true
+    # FIX: append 127.0.1.1 line if not present, otherwise update it
+    if grep -q "127.0.1.1" /etc/hosts 2>/dev/null; then
+        sed -i "s/127.0.1.1.*/127.0.1.1\t${NEW_HOST}/" /etc/hosts 2>/dev/null || true
+    else
+        printf '127.0.1.1\t%s\n' "$NEW_HOST" >> /etc/hosts
+    fi
     ok "Hostname set to ${NEW_HOST}"
 else
     info "Hostname unchanged: ${CURRENT_HOST}"
@@ -217,17 +235,19 @@ if [ "$CREATE_USER" = "y" ]; then
     # Ensure sudo is installed (minimal containers may not have it)
     if ! command -v sudo >/dev/null 2>&1; then
         info "Installing sudo..."
-        apt-get install -y sudo 2>&1 | grep -E "^(Setting up|is already)" || true
+        DEBIAN_FRONTEND=noninteractive apt-get install -y sudo 2>&1 | grep -E "^(Setting up|is already)" || true
         ok "sudo installed"
     fi
     if id "$NEW_USER" &>/dev/null; then
         warn "User '${NEW_USER}' already exists — updating password only"
-        echo "${NEW_USER}:${NEW_PASS}" | chpasswd
+        # FIX: printf is a bash builtin -- no subprocess, so password never appears in ps/proc
+printf '%s:%s\n' "$NEW_USER" "$NEW_PASS" | chpasswd
     else
         info "Creating user '${NEW_USER}' with home directory and bash shell..."
         groupadd -f sudo
         useradd -m -s /bin/bash -G sudo "$NEW_USER"
-        echo "${NEW_USER}:${NEW_PASS}" | chpasswd
+        # FIX: printf is a bash builtin -- no subprocess, so password never appears in ps/proc
+printf '%s:%s\n' "$NEW_USER" "$NEW_PASS" | chpasswd
         ok "User '${NEW_USER}' created — home dir: /home/${NEW_USER}"
     fi
     info "Granting passwordless sudo..."
@@ -236,10 +256,14 @@ if [ "$CREATE_USER" = "y" ]; then
     chmod 440 "/etc/sudoers.d/${NEW_USER}"
     ok "Sudo NOPASSWD configured — ${NEW_USER} can run any command without password"
     TARGET_USER="$NEW_USER"
-    TARGET_HOME=$(eval echo "~${NEW_USER}")
+    # FIX: eval with user input is code injection -- use getent to safely resolve home
+TARGET_HOME=$(getent passwd "$NEW_USER" | cut -d: -f6)
+[ -z "$TARGET_HOME" ] && TARGET_HOME="/home/${NEW_USER}"
 else
     TARGET_USER=$(logname 2>/dev/null || echo "${SUDO_USER:-root}")
-    TARGET_HOME=$(eval echo "~${TARGET_USER}")
+    # FIX: eval with user input is code injection -- use getent to safely resolve home
+    TARGET_HOME=$(getent passwd "$TARGET_USER" | cut -d: -f6)
+    [ -z "$TARGET_HOME" ] && TARGET_HOME="/home/${TARGET_USER}"
 fi
 
 # ── SSH Key ───────────────────────────────────────────────────────
@@ -251,7 +275,7 @@ if [ "$SSH_METHOD" != "none" ]; then
 
     if [ "$SSH_METHOD" = "github" ]; then
         info "Fetching public keys from github.com/${GH_USER}..."
-        apt-get install -y ssh-import-id 2>&1 | grep -E "^(Setting up|is already)" || true
+        DEBIAN_FRONTEND=noninteractive apt-get install -y ssh-import-id 2>&1 | grep -E "^(Setting up|is already)" || true
         if command -v ssh-import-id >/dev/null 2>&1; then
             if su - "$TARGET_USER" -c "ssh-import-id gh:${GH_USER}" 2>&1; then
                 ok "SSH key imported from GitHub user '${GH_USER}'"
@@ -296,7 +320,7 @@ if [ "$INSTALL_ESSENTIALS" = "y" ]; then
         group_pkgs="${group_entry#*:}"
         info "  📦 ${group_name}: ${group_pkgs}"
         # shellcheck disable=SC2086
-        apt-get install -y $group_pkgs 2>&1 | grep -E "^(Setting up|is already|E: Unable)" | head -20 || true
+        DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::="--force-confold" install -y $group_pkgs 2>&1 | grep -E "^(Setting up|is already|E: Unable)" | head -20 || true
     done
 
     echo ""
@@ -345,7 +369,7 @@ if [ "$INSTALL_EXTRAS" = "y" ]; then
         group_pkgs="${group_entry#*:}"
         info "  📦 ${group_name}: ${group_pkgs}"
         # shellcheck disable=SC2086
-        apt-get install -y $group_pkgs 2>&1 | grep -E "^(Setting up|is already|E: Unable)" | head -20 || true
+        DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::="--force-confold" install -y $group_pkgs 2>&1 | grep -E "^(Setting up|is already|E: Unable)" | head -20 || true
     done
 
     echo ""
@@ -409,9 +433,8 @@ if [ "$INSTALL_CLAUDE" = "y" ]; then
     else
         warn "Claude Code install failed — may need manual install later"
     fi
-    info "Adding Claude Code aliases to ~/.bashrc_local..."
-    su - "$TARGET_USER" -c 'touch ~/.bashrc_local && grep -q "alias ccc=" ~/.bashrc_local || echo -e "\nalias ccc=\"claude --dangerously-skip-permissions\"\nalias cccc=\"claude --dangerously-skip-permissions -c\"" >> ~/.bashrc_local'
-    ok "Aliases added: ccc (skip permissions), cccc (skip + continue)"
+    # FIX: removed duplicate alias injection -- .bashrc already defines ccc/cccc
+    ok "Claude Code ready (ccc/cccc aliases included in NixBash)"
 fi
 
 # ── Cleanup ───────────────────────────────────────────────────────
