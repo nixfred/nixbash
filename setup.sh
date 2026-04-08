@@ -2,7 +2,7 @@
 # NixBash Interactive Setup - Full server provisioning
 # https://github.com/nixfred/nixbash
 #
-# Usage: curl -sL https://raw.githubusercontent.com/nixfred/nixbash/main/setup.sh | bash
+# Usage: curl -sL https://raw.githubusercontent.com/nixfred/nixbash/main/setup.sh | sudo bash
 #
 # Interactive first-boot setup for fresh Linux servers.
 # For non-interactive shell-only install, use install.sh instead.
@@ -14,12 +14,14 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 RED='\033[0;31m'
 BOLD='\033[1m'
+DIM='\033[2m'
 RESET='\033[0m'
 
 info()  { echo -e "${CYAN}[NixSetup]${RESET} $*"; }
-ok()    { echo -e "${GREEN}[NixSetup]${RESET} $*"; }
-warn()  { echo -e "${YELLOW}[NixSetup]${RESET} $*"; }
-fail()  { echo -e "${RED}[NixSetup]${RESET} $*"; exit 1; }
+ok()    { echo -e "${GREEN}[NixSetup]${RESET} ✅ $*"; }
+warn()  { echo -e "${YELLOW}[NixSetup]${RESET} ⚠️  $*"; }
+fail()  { echo -e "${RED}[NixSetup]${RESET} ❌ $*"; exit 1; }
+step()  { echo -e "\n${BOLD}${CYAN}━━ Step $1/$TOTAL_STEPS: $2 ━━${RESET}"; }
 
 ask() {
     local prompt="$1" default="${2:-}" var
@@ -51,15 +53,22 @@ if [ "$(id -u)" -ne 0 ]; then
     fail "This script must be run as root (sudo bash setup.sh)"
 fi
 
+START_TIME=$(date +%s)
+
 echo ""
 echo -e "${BOLD}${CYAN}⚡ NixBash Interactive Setup${RESET}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo -e "  Full server provisioning for fresh Linux boxes"
+echo -e "  ${DIM}Running as root on $(hostname) — $(date '+%Y-%m-%d %H:%M:%S %Z')${RESET}"
 echo -e "  For shell-only install, use ${BOLD}install.sh${RESET} instead"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo ""
 
-# ── Step 1: User Setup ────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════
+# GATHER CHOICES
+# ══════════════════════════════════════════════════════════════════
+
+# ── User Setup ────────────────────────────────────────────────────
 echo -e "${BOLD}── User Setup ──${RESET}"
 CREATE_USER="n"
 if ask_yn "Create a new sudo user?"; then
@@ -71,20 +80,22 @@ if ask_yn "Create a new sudo user?"; then
     fi
 fi
 
-# ── Step 2: Hostname ──────────────────────────────────────────────
+# ── Hostname ──────────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}── System ──${RESET}"
 CURRENT_HOST=$(hostname)
 NEW_HOST=$(ask "Hostname" "$CURRENT_HOST")
 
-# ── Step 3: Timezone ──────────────────────────────────────────────
+# ── Timezone ──────────────────────────────────────────────────────
 CURRENT_TZ=$(timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || echo "UTC")
 NEW_TZ=$(ask "Timezone" "$CURRENT_TZ")
 
-# ── Step 4: SSH Key ───────────────────────────────────────────────
+# ── SSH Key ───────────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}── SSH ──${RESET}"
 SSH_METHOD="none"
+GH_USER=""
+SSH_KEY=""
 if ask_yn "Import SSH key?"; then
     echo -e "  ${CYAN}1)${RESET} From GitHub username"
     echo -e "  ${CYAN}2)${RESET} Paste public key manually"
@@ -105,7 +116,7 @@ if [ "$SSH_METHOD" != "none" ]; then
     fi
 fi
 
-# ── Step 5: Optional Components ───────────────────────────────────
+# ── Optional Components ──────────────────────────────────────────
 echo ""
 echo -e "${BOLD}── Components ──${RESET}"
 INSTALL_DOCKER=$(ask_yn "Install Docker?" "y" && echo "y" || echo "n")
@@ -139,176 +150,265 @@ echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 
 if ! ask_yn "Proceed with setup?"; then
-    warn "Aborted."
+    warn "Aborted by user."
     exit 0
 fi
 
-echo ""
-info "Starting setup..."
-echo ""
+# ══════════════════════════════════════════════════════════════════
+# EXECUTION — verbose narrated output
+# ══════════════════════════════════════════════════════════════════
 
-# ══════════════════════════════════════════════════════════════════
-# EXECUTION
-# ══════════════════════════════════════════════════════════════════
+# Calculate total steps dynamically
+TOTAL_STEPS=4  # update, hostname/tz, nixbash, cleanup — always present
+[ "$CREATE_USER" = "y" ] && TOTAL_STEPS=$((TOTAL_STEPS + 1))
+[ "$SSH_METHOD" != "none" ] && TOTAL_STEPS=$((TOTAL_STEPS + 1))
+[ "$DISABLE_PASS_SSH" = "y" ] && TOTAL_STEPS=$((TOTAL_STEPS + 1))
+[ "$INSTALL_TOOLS" = "y" ] && TOTAL_STEPS=$((TOTAL_STEPS + 1))
+[ "$INSTALL_DOCKER" = "y" ] && TOTAL_STEPS=$((TOTAL_STEPS + 1))
+[ "$INSTALL_TAILSCALE" = "y" ] && TOTAL_STEPS=$((TOTAL_STEPS + 1))
+[ "$INSTALL_CLAUDE" = "y" ] && TOTAL_STEPS=$((TOTAL_STEPS + 1))
+
+CURRENT_STEP=0
+next_step() { CURRENT_STEP=$((CURRENT_STEP + 1)); step "$CURRENT_STEP" "$1"; }
+
+echo ""
+echo -e "${BOLD}${GREEN}🚀 Starting setup — ${TOTAL_STEPS} steps to go...${RESET}"
 
 # ── System update ─────────────────────────────────────────────────
-info "Updating system packages..."
-apt-get update -qq
-apt-get upgrade -y -qq
-ok "System updated"
+next_step "System Update"
+info "Updating package lists..."
+apt-get update 2>&1 | tail -3
+info "Upgrading installed packages..."
+apt-get upgrade -y 2>&1 | tail -5
+ok "System packages are up to date"
 
-# ── Hostname ──────────────────────────────────────────────────────
+# ── Hostname & Timezone ──────────────────────────────────────────
+next_step "Hostname & Timezone"
 if [ "$NEW_HOST" != "$CURRENT_HOST" ]; then
+    info "Changing hostname: ${CURRENT_HOST} → ${NEW_HOST}"
     hostnamectl set-hostname "$NEW_HOST" 2>/dev/null || echo "$NEW_HOST" > /etc/hostname
     sed -i "s/127.0.1.1.*/127.0.1.1\t${NEW_HOST}/" /etc/hosts 2>/dev/null || true
     ok "Hostname set to ${NEW_HOST}"
+else
+    info "Hostname unchanged: ${CURRENT_HOST}"
 fi
 
-# ── Timezone ──────────────────────────────────────────────────────
+info "Setting timezone to ${NEW_TZ}..."
 timedatectl set-timezone "$NEW_TZ" 2>/dev/null || ln -sf "/usr/share/zoneinfo/${NEW_TZ}" /etc/localtime
-ok "Timezone set to ${NEW_TZ}"
+ok "Timezone set to ${NEW_TZ} — current time: $(date '+%H:%M:%S %Z')"
 
 # ── Create user ───────────────────────────────────────────────────
 if [ "$CREATE_USER" = "y" ]; then
+    next_step "Create User"
     if id "$NEW_USER" &>/dev/null; then
-        warn "User ${NEW_USER} already exists, updating password"
+        warn "User '${NEW_USER}' already exists — updating password only"
         echo "${NEW_USER}:${NEW_PASS}" | chpasswd
     else
+        info "Creating user '${NEW_USER}' with home directory and bash shell..."
         useradd -m -s /bin/bash -G sudo "$NEW_USER"
         echo "${NEW_USER}:${NEW_PASS}" | chpasswd
-        ok "User ${NEW_USER} created"
+        ok "User '${NEW_USER}' created — home dir: /home/${NEW_USER}"
     fi
+    info "Granting passwordless sudo..."
     echo "${NEW_USER} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/${NEW_USER}"
     chmod 440 "/etc/sudoers.d/${NEW_USER}"
-    ok "Sudo NOPASSWD configured for ${NEW_USER}"
+    ok "Sudo NOPASSWD configured — ${NEW_USER} can run any command without password"
     TARGET_USER="$NEW_USER"
     TARGET_HOME=$(eval echo "~${NEW_USER}")
 else
-    TARGET_USER=$(logname 2>/dev/null || echo "$SUDO_USER" 2>/dev/null || echo "root")
+    TARGET_USER=$(logname 2>/dev/null || echo "${SUDO_USER:-root}")
     TARGET_HOME=$(eval echo "~${TARGET_USER}")
 fi
 
 # ── SSH Key ───────────────────────────────────────────────────────
 if [ "$SSH_METHOD" != "none" ]; then
+    next_step "SSH Key Import"
     SSH_DIR="${TARGET_HOME}/.ssh"
+    info "Creating SSH directory: ${SSH_DIR}"
     mkdir -p "$SSH_DIR"
 
     if [ "$SSH_METHOD" = "github" ]; then
-        apt-get install -y -qq ssh-import-id >/dev/null 2>&1 || true
+        info "Fetching public keys from github.com/${GH_USER}..."
+        apt-get install -y ssh-import-id 2>&1 | grep -E "^(Setting up|is already)" || true
         if command -v ssh-import-id >/dev/null 2>&1; then
-            su - "$TARGET_USER" -c "ssh-import-id gh:${GH_USER}" 2>/dev/null && ok "SSH key imported from GitHub (${GH_USER})" || {
-                # Fallback: curl the keys directly
-                curl -sL "https://github.com/${GH_USER}.keys" >> "${SSH_DIR}/authorized_keys"
-                ok "SSH key imported from GitHub (${GH_USER}) via curl"
-            }
+            if su - "$TARGET_USER" -c "ssh-import-id gh:${GH_USER}" 2>&1; then
+                ok "SSH key imported from GitHub user '${GH_USER}'"
+            else
+                info "ssh-import-id failed, trying direct curl fallback..."
+                KEY_COUNT=$(curl -sL "https://github.com/${GH_USER}.keys" | tee -a "${SSH_DIR}/authorized_keys" | wc -l)
+                ok "Imported ${KEY_COUNT} SSH key(s) from GitHub via curl"
+            fi
         else
-            curl -sL "https://github.com/${GH_USER}.keys" >> "${SSH_DIR}/authorized_keys"
-            ok "SSH key imported from GitHub (${GH_USER})"
+            KEY_COUNT=$(curl -sL "https://github.com/${GH_USER}.keys" | tee -a "${SSH_DIR}/authorized_keys" | wc -l)
+            ok "Imported ${KEY_COUNT} SSH key(s) from GitHub"
         fi
     elif [ "$SSH_METHOD" = "paste" ]; then
+        info "Adding provided public key to authorized_keys..."
         echo "$SSH_KEY" >> "${SSH_DIR}/authorized_keys"
-        ok "SSH key added"
+        ok "SSH key added to ${SSH_DIR}/authorized_keys"
     fi
 
+    info "Setting permissions: ${SSH_DIR} (700), authorized_keys (600)"
     chown -R "${TARGET_USER}:${TARGET_USER}" "$SSH_DIR"
     chmod 700 "$SSH_DIR"
     chmod 600 "${SSH_DIR}/authorized_keys"
+    ok "SSH key configured for ${TARGET_USER}"
 fi
 
 # ── Disable SSH password auth ─────────────────────────────────────
 if [ "$DISABLE_PASS_SSH" = "y" ]; then
+    next_step "Harden SSH"
+    info "Disabling SSH password authentication in /etc/ssh/sshd_config..."
     sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
     sed -i 's/^#\?ChallengeResponseAuthentication.*/ChallengeResponseAuthentication no/' /etc/ssh/sshd_config
+    info "Restarting SSH service..."
     systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || true
-    ok "SSH password authentication disabled"
+    ok "SSH password authentication disabled — key-only access from now on"
+    warn "Make sure your SSH key works before you disconnect!"
 fi
 
 # ── Full tool suite ───────────────────────────────────────────────
 if [ "$INSTALL_TOOLS" = "y" ]; then
-    info "Installing full tool suite (this may take a few minutes)..."
-    apt-get install -y -qq \
-        python3-pip sysbench iftop git sshfs figlet lolcat multitail glances cowsay \
-        ncdu nmap net-tools vnstat mc cifs-utils autossh ansiweather inxi htop \
-        tor proxychains rclone unzip wget traceroute unattended-upgrades tcpdump \
-        zram-tools rsync pv tree lsof vim nano tmux mtr atop irssi pciutils \
-        smartmontools stress lm-sensors iptraf-ng iotop ansible iputils-ping \
-        fail2ban nala bmon dstat cmatrix iptables openssh-server \
-        2>/dev/null || warn "Some packages may not be available on this distro"
+    next_step "Full Tool Suite"
+    info "Installing 50+ sysadmin packages — this will take a few minutes..."
+    echo ""
+
+    TOOL_GROUPS=(
+        "monitoring:htop atop iotop iftop glances bmon dstat vnstat inxi sysbench stress"
+        "networking:nmap mtr traceroute tcpdump net-tools iputils-ping autossh ansiweather"
+        "security:fail2ban tor proxychains iptables"
+        "filesystem:ncdu tree rsync pv lsof sshfs cifs-utils rclone"
+        "editors:vim nano mc tmux irssi"
+        "utilities:git figlet lolcat cowsay multitail unzip wget python3-pip cmatrix"
+        "services:openssh-server unattended-upgrades zram-tools nala"
+        "hardware:pciutils smartmontools lm-sensors iptraf-ng ansible"
+    )
+
+    for group_entry in "${TOOL_GROUPS[@]}"; do
+        group_name="${group_entry%%:*}"
+        group_pkgs="${group_entry#*:}"
+        info "  📦 ${group_name}: ${group_pkgs}"
+        # shellcheck disable=SC2086
+        apt-get install -y $group_pkgs 2>&1 | grep -E "^(Setting up|is already|E: Unable)" | head -20 || true
+    done
+
+    echo ""
+
     # Configure unattended-upgrades non-interactively
+    info "Configuring unattended-upgrades (no auto-reboot)..."
     echo 'Unattended-Upgrade::Automatic-Reboot "false";' > /etc/apt/apt.conf.d/51custom-unattended
+    ok "Unattended security updates enabled (reboot disabled)"
+
+    # Configure fail2ban
+    if command -v fail2ban-server >/dev/null 2>&1; then
+        info "Configuring fail2ban with default SSH jail..."
+        cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local 2>/dev/null || true
+        systemctl enable fail2ban 2>/dev/null && systemctl start fail2ban 2>/dev/null
+        ok "fail2ban active — protecting SSH against brute force"
+    fi
+
+    # Configure zram
+    if [ -f /etc/default/zramswap ]; then
+        info "Configuring zram swap (zstd compression, 50% of RAM)..."
+        echo -e "ALGO=zstd\nPERCENT=50" > /etc/default/zramswap
+        systemctl restart zramswap 2>/dev/null || true
+        ok "zram swap enabled"
+    fi
+
     ok "Full tool suite installed"
-fi
-
-# ── fail2ban ──────────────────────────────────────────────────────
-if command -v fail2ban-server >/dev/null 2>&1; then
-    cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local 2>/dev/null || true
-    systemctl enable fail2ban 2>/dev/null && systemctl start fail2ban 2>/dev/null
-    ok "fail2ban configured and started"
-fi
-
-# ── zram ──────────────────────────────────────────────────────────
-if [ -f /etc/default/zramswap ]; then
-    echo -e "ALGO=zstd\nPERCENT=50" > /etc/default/zramswap
-    systemctl restart zramswap 2>/dev/null || true
-    ok "zram configured (zstd, 50%)"
 fi
 
 # ── Docker ────────────────────────────────────────────────────────
 if [ "$INSTALL_DOCKER" = "y" ]; then
+    next_step "Docker"
     if command -v docker >/dev/null 2>&1; then
-        ok "Docker already installed"
+        DOCKER_VER=$(docker --version 2>/dev/null | head -1)
+        ok "Docker already installed: ${DOCKER_VER}"
     else
-        info "Installing Docker..."
-        curl -fsSL https://get.docker.com | sh
+        info "Downloading and installing Docker via get.docker.com..."
+        curl -fsSL https://get.docker.com | sh 2>&1 | tail -5
+        info "Adding ${TARGET_USER} to docker group..."
         usermod -aG docker "$TARGET_USER"
-        ok "Docker installed (${TARGET_USER} added to docker group)"
+        DOCKER_VER=$(docker --version 2>/dev/null | head -1)
+        ok "Docker installed: ${DOCKER_VER}"
+        ok "${TARGET_USER} can run docker without sudo (re-login required)"
     fi
 fi
 
 # ── Tailscale ─────────────────────────────────────────────────────
 if [ "$INSTALL_TAILSCALE" = "y" ]; then
+    next_step "Tailscale"
     if command -v tailscale >/dev/null 2>&1; then
         ok "Tailscale already installed"
     else
-        info "Installing Tailscale..."
-        curl -fsSL https://tailscale.com/install.sh | sh
+        info "Downloading and installing Tailscale..."
+        curl -fsSL https://tailscale.com/install.sh | sh 2>&1 | tail -5
         ok "Tailscale installed"
     fi
     if [ -n "$TS_KEY" ]; then
-        tailscale up --authkey="$TS_KEY" --accept-routes
-        ok "Tailscale connected: $(tailscale ip -4 2>/dev/null)"
+        info "Authenticating with Tailscale using provided auth key..."
+        tailscale up --authkey="$TS_KEY" --accept-routes 2>&1
+        TS_IP=$(tailscale ip -4 2>/dev/null || echo "unknown")
+        ok "Tailscale connected — IP: ${TS_IP}"
     else
-        info "Run 'sudo tailscale up' to authenticate"
+        info "Tailscale installed but not authenticated"
+        info "Run 'sudo tailscale up' to connect to your tailnet"
     fi
 fi
 
 # ── NixBash (always) ─────────────────────────────────────────────
+next_step "NixBash Shell Environment"
 info "Installing NixBash for ${TARGET_USER}..."
-su - "$TARGET_USER" -c 'curl -sL https://raw.githubusercontent.com/nixfred/nixbash/main/install.sh | bash'
-ok "NixBash installed for ${TARGET_USER}"
+su - "$TARGET_USER" -c 'curl -sL https://raw.githubusercontent.com/nixfred/nixbash/main/install.sh | bash' 2>&1
+ok "NixBash shell environment installed for ${TARGET_USER}"
 
 # ── Claude Code ───────────────────────────────────────────────────
 if [ "$INSTALL_CLAUDE" = "y" ]; then
-    info "Installing Claude Code for ${TARGET_USER}..."
-    su - "$TARGET_USER" -c 'curl -fsSL https://claude.ai/install.sh | bash' 2>/dev/null || warn "Claude Code install failed (may need manual install)"
-    # Add aliases
+    next_step "Claude Code"
+    info "Downloading Claude Code for ${TARGET_USER}..."
+    if su - "$TARGET_USER" -c 'curl -fsSL https://claude.ai/install.sh | bash' 2>&1; then
+        ok "Claude Code installed"
+    else
+        warn "Claude Code install failed — may need manual install later"
+    fi
+    info "Adding Claude Code aliases to ~/.bashrc_local..."
     su - "$TARGET_USER" -c 'grep -q "alias ccc=" ~/.bashrc_local 2>/dev/null || echo -e "\nalias ccc=\"claude --dangerously-skip-permissions\"\nalias cccc=\"claude --dangerously-skip-permissions -c\"" >> ~/.bashrc_local'
-    ok "Claude Code installed with aliases in .bashrc_local"
+    ok "Aliases added: ccc (skip permissions), cccc (skip + continue)"
 fi
 
 # ── Cleanup ───────────────────────────────────────────────────────
-apt-get autoclean -qq
-apt-get autoremove -y -qq 2>/dev/null || true
+next_step "Cleanup"
+info "Removing downloaded package files..."
+apt-get autoclean 2>&1 | tail -1
+info "Removing unused packages..."
+apt-get autoremove -y 2>&1 | tail -3
+ok "System cleaned up"
 
 # ── Done ──────────────────────────────────────────────────────────
+END_TIME=$(date +%s)
+ELAPSED=$((END_TIME - START_TIME))
+MINUTES=$((ELAPSED / 60))
+SECONDS_REMAINING=$((ELAPSED % 60))
+
 echo ""
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-echo -e "${GREEN}⚡ NixBash Setup Complete!${RESET}"
+echo -e "${GREEN}⚡ NixBash Setup Complete! (${MINUTES}m ${SECONDS_REMAINING}s)${RESET}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo ""
-[ "$CREATE_USER" = "y" ] && echo -e "  Login:  ${CYAN}ssh ${NEW_USER}@$(hostname)${RESET}"
-[ "$DISABLE_PASS_SSH" = "y" ] && echo -e "  Auth:   ${YELLOW}key-only (password disabled)${RESET}"
-[ "$INSTALL_TAILSCALE" = "y" ] && command -v tailscale >/dev/null 2>&1 && echo -e "  Tailscale: ${GREEN}$(tailscale ip -4 2>/dev/null || echo 'run tailscale up')${RESET}"
+echo -e "  ${BOLD}What was done:${RESET}"
+echo -e "  ✅ System updated and upgraded"
+echo -e "  ✅ Hostname: ${GREEN}$(hostname)${RESET} | Timezone: ${GREEN}${NEW_TZ}${RESET}"
+[ "$CREATE_USER" = "y" ] && echo -e "  ✅ User created: ${GREEN}${NEW_USER}${RESET} (sudo NOPASSWD)"
+[ "$SSH_METHOD" != "none" ] && echo -e "  ✅ SSH key imported"
+[ "$DISABLE_PASS_SSH" = "y" ] && echo -e "  ✅ SSH password auth: ${YELLOW}disabled${RESET}"
+[ "$INSTALL_TOOLS" = "y" ] && echo -e "  ✅ 50+ sysadmin tools installed"
+[ "$INSTALL_DOCKER" = "y" ] && echo -e "  ✅ Docker: ${GREEN}$(docker --version 2>/dev/null | head -1 || echo 'installed')${RESET}"
+[ "$INSTALL_TAILSCALE" = "y" ] && echo -e "  ✅ Tailscale: ${GREEN}$(tailscale ip -4 2>/dev/null || echo 'installed — run tailscale up')${RESET}"
+echo -e "  ✅ NixBash shell environment"
+[ "$INSTALL_CLAUDE" = "y" ] && echo -e "  ✅ Claude Code with aliases"
 echo ""
-echo -e "  ${CYAN}Reboot recommended to apply all changes.${RESET}"
+[ "$CREATE_USER" = "y" ] && echo -e "  ${BOLD}Connect:${RESET}  ${CYAN}ssh ${NEW_USER}@$(hostname)${RESET}"
+echo -e "  ${BOLD}Activate:${RESET} ${CYAN}source ~/.bashrc${RESET} (or re-login)"
+echo ""
+echo -e "  ${YELLOW}Reboot recommended to apply all changes.${RESET}"
 echo ""
