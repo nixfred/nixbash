@@ -9,6 +9,8 @@
 # PATH SETUP
 ######################################################################
 [[ ":$PATH:" != *":$HOME/.local/bin:"* ]] && export PATH="$HOME/.local/bin:$PATH"
+[[ -d "$HOME/.bun/bin" && ":$PATH:" != *":$HOME/.bun/bin:"* ]] && export PATH="$HOME/.bun/bin:$PATH"
+[[ -d "$HOME/.cargo/bin" && ":$PATH:" != *":$HOME/.cargo/bin:"* ]] && export PATH="$HOME/.cargo/bin:$PATH"
 
 ######################################################################
 # SYSTEM ALIASES
@@ -21,7 +23,7 @@ alias aa='(command -v sudo >/dev/null && sudo apt update && sudo apt upgrade -y 
 alias eh='command -v sudo >/dev/null && sudo nano /etc/hosts || nano /etc/hosts'
 
 # System info
-alias neo='neofetch || screenfetch 2>/dev/null || echo "Install neofetch: sudo apt install neofetch"'
+alias neo='fastfetch 2>/dev/null || neofetch 2>/dev/null || screenfetch 2>/dev/null || echo "Install fastfetch: sudo apt install fastfetch"'
 alias ip='ip a'
 alias df='df -hT | grep -v tmpfs'
 alias myip='curl -s ifconfig.me'
@@ -76,7 +78,7 @@ alias vi='nano'
 alias svi='command -v sudo >/dev/null && sudo nano || nano'
 
 # Process and monitoring
-alias top='htop -t 2>/dev/null || top'
+alias top='btop 2>/dev/null || htop -t 2>/dev/null || top'
 alias htop='htop -t'
 alias du='du -sh * | sort -h'
 alias memtop='ps aux --sort=-%mem | head -n 15'
@@ -260,6 +262,19 @@ print_system_banner() {
         TEMP="N/A"
     fi
 
+    # Tailscale status
+    if command -v tailscale >/dev/null 2>&1; then
+        TS_IP=$(tailscale ip -4 2>/dev/null || echo "")
+        TS_STATUS=$(tailscale status --self 2>/dev/null | awk '{print $NF}' || echo "")
+        if [ -n "$TS_IP" ]; then
+            TAILSCALE="${TS_IP} (${TS_STATUS:-unknown})"
+        else
+            TAILSCALE="not connected"
+        fi
+    else
+        TAILSCALE="Not installed"
+    fi
+
     # Docker status
     if command -v docker >/dev/null 2>&1; then
         DOCKER_RUNNING=$(docker ps -q 2>/dev/null | wc -l)
@@ -294,6 +309,7 @@ print_system_banner() {
     echo -e "${WHITE}*  Memory:      ${GREEN}$MEM${RESET}"
     echo -e "${WHITE}*  Disk:        ${YELLOW}$DISK${RESET}"
     echo -e "${WHITE}*  Temp:        ${BLUE}$TEMP${RESET}"
+    echo -e "${WHITE}*  Tailscale:   ${GREEN}$TAILSCALE${RESET}"
     echo -e "${WHITE}*  Docker:      ${PURPLE}$DOCKER_STATUS${RESET}"
     echo -e "${WHITE}*  SSH Fails:   ${RED}$SSH_FAILS${RESET}"
     echo -e "${BOLD}${BLUE}****************************************************${RESET}"

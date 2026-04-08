@@ -23,6 +23,9 @@ curl -sL https://raw.githubusercontent.com/nixfred/nixbash/main/install.sh | bas
 - `zoxide` — smart `cd` that learns
 - `ripgrep` — fast recursive search
 - `htop` — better `top`
+- `btop` — beautiful resource monitor (replaces top/htop/iotop in one TUI)
+- `fastfetch` — system info display (replaces neofetch)
+- `ncdu` — interactive disk usage analyzer
 - `tree` — directory visualization
 
 **Functions:**

@@ -106,7 +106,14 @@ install_tool fzf fzf
 install_tool rg ripgrep
 install_tool tree tree
 install_tool htop htop
+install_tool btop btop
+install_tool ncdu ncdu
 install_tool curl curl
+
+# fastfetch (replaces neofetch)
+if ! command -v fastfetch >/dev/null 2>&1; then
+    install_tool fastfetch fastfetch
+fi
 
 # eza - may need a separate repo on older distros
 if ! command -v eza >/dev/null 2>&1; then
