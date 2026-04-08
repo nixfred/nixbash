@@ -46,10 +46,15 @@ ask_yn() {
 }
 
 ask_secret() {
-    local prompt="$1" var
-    read -srp "$(echo -e "${CYAN}[?]${RESET} ${prompt}: ")" var < /dev/tty
+    local prompt="$1" var=""
+    # Print prompt to tty, read silently from tty
+    printf "${CYAN}[?]${RESET} %s: " "$prompt" > /dev/tty
+    # Disable echo, read, restore echo
+    stty -echo < /dev/tty 2>/dev/null || true
+    IFS= read -r var < /dev/tty
+    stty echo < /dev/tty 2>/dev/null || true
     echo "" > /dev/tty
-    echo "$var"
+    printf '%s' "$var"
 }
 
 # ── Require root ───────────────────────────────────────────────────
