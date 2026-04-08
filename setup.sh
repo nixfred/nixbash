@@ -138,7 +138,7 @@ if ask_yn "Install Tailscale?" "y"; then INSTALL_TAILSCALE="y"; else INSTALL_TAI
 
 TS_KEY=""
 if [ "$INSTALL_TAILSCALE" = "y" ]; then
-    TS_KEY=$(ask "Tailscale auth key (leave blank to authenticate manually)" "")
+    TS_KEY=$(ask "Tailscale auth key (blank = authenticate manually)")
 fi
 
 if ask_yn "Install essential tools (20 packages: git, vim, tmux, nmap, rsync, etc.)?" "y"; then INSTALL_ESSENTIALS="y"; else INSTALL_ESSENTIALS="n"; fi
@@ -225,6 +225,7 @@ if [ "$CREATE_USER" = "y" ]; then
         echo "${NEW_USER}:${NEW_PASS}" | chpasswd
     else
         info "Creating user '${NEW_USER}' with home directory and bash shell..."
+        groupadd -f sudo
         useradd -m -s /bin/bash -G sudo "$NEW_USER"
         echo "${NEW_USER}:${NEW_PASS}" | chpasswd
         ok "User '${NEW_USER}' created — home dir: /home/${NEW_USER}"
@@ -309,8 +310,9 @@ if [ "$INSTALL_ESSENTIALS" = "y" ]; then
     if command -v fail2ban-server >/dev/null 2>&1; then
         info "Configuring fail2ban with default SSH jail..."
         cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local 2>/dev/null || true
-        systemctl enable fail2ban 2>/dev/null && systemctl start fail2ban 2>/dev/null
-        ok "fail2ban active — protecting SSH against brute force"
+        systemctl enable fail2ban 2>/dev/null || true
+        systemctl start fail2ban 2>/dev/null || true
+        ok "fail2ban configured (starts on boot)"
     fi
 
     # Configure zram
@@ -391,7 +393,11 @@ fi
 # ── NixBash (always) ─────────────────────────────────────────────
 next_step "NixBash Shell Environment"
 info "Installing NixBash for ${TARGET_USER}..."
-su - "$TARGET_USER" -c 'curl -sL https://raw.githubusercontent.com/nixfred/nixbash/main/install.sh | bash' 2>&1
+if [ "$TARGET_USER" = "root" ]; then
+    curl -sL https://raw.githubusercontent.com/nixfred/nixbash/main/install.sh | bash 2>&1
+else
+    su - "$TARGET_USER" -c 'curl -sL https://raw.githubusercontent.com/nixfred/nixbash/main/install.sh | bash' 2>&1
+fi
 ok "NixBash shell environment installed for ${TARGET_USER}"
 
 # ── Claude Code ───────────────────────────────────────────────────
@@ -404,7 +410,7 @@ if [ "$INSTALL_CLAUDE" = "y" ]; then
         warn "Claude Code install failed — may need manual install later"
     fi
     info "Adding Claude Code aliases to ~/.bashrc_local..."
-    su - "$TARGET_USER" -c 'grep -q "alias ccc=" ~/.bashrc_local 2>/dev/null || echo -e "\nalias ccc=\"claude --dangerously-skip-permissions\"\nalias cccc=\"claude --dangerously-skip-permissions -c\"" >> ~/.bashrc_local'
+    su - "$TARGET_USER" -c 'touch ~/.bashrc_local && grep -q "alias ccc=" ~/.bashrc_local || echo -e "\nalias ccc=\"claude --dangerously-skip-permissions\"\nalias cccc=\"claude --dangerously-skip-permissions -c\"" >> ~/.bashrc_local'
     ok "Aliases added: ccc (skip permissions), cccc (skip + continue)"
 fi
 
