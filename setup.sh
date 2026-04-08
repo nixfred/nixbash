@@ -200,6 +200,12 @@ ok "Timezone set to ${NEW_TZ} — current time: $(date '+%H:%M:%S %Z')"
 # ── Create user ───────────────────────────────────────────────────
 if [ "$CREATE_USER" = "y" ]; then
     next_step "Create User"
+    # Ensure sudo is installed (minimal containers may not have it)
+    if ! command -v sudo >/dev/null 2>&1; then
+        info "Installing sudo..."
+        apt-get install -y sudo 2>&1 | grep -E "^(Setting up|is already)" || true
+        ok "sudo installed"
+    fi
     if id "$NEW_USER" &>/dev/null; then
         warn "User '${NEW_USER}' already exists — updating password only"
         echo "${NEW_USER}:${NEW_PASS}" | chpasswd
@@ -210,6 +216,7 @@ if [ "$CREATE_USER" = "y" ]; then
         ok "User '${NEW_USER}' created — home dir: /home/${NEW_USER}"
     fi
     info "Granting passwordless sudo..."
+    mkdir -p /etc/sudoers.d
     echo "${NEW_USER} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/${NEW_USER}"
     chmod 440 "/etc/sudoers.d/${NEW_USER}"
     ok "Sudo NOPASSWD configured — ${NEW_USER} can run any command without password"
