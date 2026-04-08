@@ -18,7 +18,16 @@
 
 # Package management (works with or without sudo)
 alias reboot='command -v sudo >/dev/null && sudo reboot || reboot'
-alias si='command -v sudo >/dev/null && sudo apt install -y || apt install -y'
+#alias si='command -v sudo >/dev/null && sudo apt install -y || apt install -y'
+
+si() {
+  if command -v sudo >/dev/null 2>&1; then
+    sudo apt install -y "$@"
+  else
+    apt install -y "$@"
+  fi
+}
+
 alias aa='(command -v sudo >/dev/null && sudo apt update && sudo apt upgrade -y && sudo apt autoremove -y) || (apt update && apt upgrade -y && apt autoremove -y)'
 alias eh='command -v sudo >/dev/null && sudo nano /etc/hosts || nano /etc/hosts'
 
