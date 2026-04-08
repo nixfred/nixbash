@@ -26,25 +26,29 @@ step()  { echo -e "\n${BOLD}${CYAN}━━ Step $1/$TOTAL_STEPS: $2 ━━${RESET
 ask() {
     local prompt="$1" default="${2:-}" var
     if [ -n "$default" ]; then
-        read -rp "$(echo -e "${CYAN}[?]${RESET} ${prompt} [${default}]: ")" var
+        read -rp "$(echo -e "${CYAN}[?]${RESET} ${prompt} [${default}]: ")" var < /dev/tty
         echo "${var:-$default}"
     else
-        read -rp "$(echo -e "${CYAN}[?]${RESET} ${prompt}: ")" var
+        read -rp "$(echo -e "${CYAN}[?]${RESET} ${prompt}: ")" var < /dev/tty
         echo "$var"
     fi
 }
 
 ask_yn() {
     local prompt="$1" default="${2:-y}" answer
-    read -rp "$(echo -e "${CYAN}[?]${RESET} ${prompt} [${default}]: ")" answer
+    read -rp "$(echo -e "${CYAN}[?]${RESET} ${prompt} [${default}]: ")" answer < /dev/tty
     answer="${answer:-$default}"
-    [[ "$answer" =~ ^[Yy] ]]
+    if [[ "$answer" =~ ^[Yy] ]]; then
+        return 0
+    else
+        return 1
+    fi
 }
 
 ask_secret() {
     local prompt="$1" var
-    read -srp "$(echo -e "${CYAN}[?]${RESET} ${prompt}: ")" var
-    echo ""
+    read -srp "$(echo -e "${CYAN}[?]${RESET} ${prompt}: ")" var < /dev/tty
+    echo "" > /dev/tty
     echo "$var"
 }
 
@@ -112,16 +116,16 @@ fi
 # ── Optional Components ──────────────────────────────────────────
 echo ""
 echo -e "${BOLD}── Components ──${RESET}"
-INSTALL_DOCKER=$(ask_yn "Install Docker?" "y" && echo "y" || echo "n")
-INSTALL_CLAUDE=$(ask_yn "Install Claude Code?" "y" && echo "y" || echo "n")
-INSTALL_TAILSCALE=$(ask_yn "Install Tailscale?" "y" && echo "y" || echo "n")
+if ask_yn "Install Docker?" "y"; then INSTALL_DOCKER="y"; else INSTALL_DOCKER="n"; fi
+if ask_yn "Install Claude Code?" "y"; then INSTALL_CLAUDE="y"; else INSTALL_CLAUDE="n"; fi
+if ask_yn "Install Tailscale?" "y"; then INSTALL_TAILSCALE="y"; else INSTALL_TAILSCALE="n"; fi
 
 TS_KEY=""
 if [ "$INSTALL_TAILSCALE" = "y" ]; then
     TS_KEY=$(ask "Tailscale auth key (leave blank to authenticate manually)" "")
 fi
 
-INSTALL_TOOLS=$(ask_yn "Install full tool suite (50+ packages)?" "y" && echo "y" || echo "n")
+if ask_yn "Install full tool suite (50+ packages)?" "y"; then INSTALL_TOOLS="y"; else INSTALL_TOOLS="n"; fi
 
 # ── Confirmation ──────────────────────────────────────────────────
 echo ""
