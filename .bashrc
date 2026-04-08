@@ -27,6 +27,10 @@ alias df='df -hT | grep -v tmpfs'
 alias myip='curl -s ifconfig.me'
 alias temp='vcgencmd measure_temp 2>/dev/null || ([ -f /sys/class/thermal/thermal_zone0/temp ] && echo "temp=$(( $(cat /sys/class/thermal/thermal_zone0/temp) / 1000 ))C") || echo "N/A"'
 
+#claude code
+alias ccc='claude --dangerously-skip-permissions'
+alias cccc='claude --dangerously-skip-permissions -c'
+
 # Quick launchers
 alias p='cd ~/Projects'
 alias 1='ping -c 100000000 1.1.1.1'
