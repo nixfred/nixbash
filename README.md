@@ -20,7 +20,6 @@ The interactive setup walks you through:
 - Create a sudo user with NOPASSWD
 - Set hostname and timezone
 - Import SSH keys from GitHub or paste manually
-- Disable SSH password authentication
 - Install Docker, Claude Code, Tailscale
 - Install 50+ sysadmin tools (monitoring, networking, security)
 - Configure fail2ban, zram, unattended-upgrades

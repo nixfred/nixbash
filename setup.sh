@@ -109,13 +109,6 @@ if ask_yn "Import SSH key?"; then
     fi
 fi
 
-DISABLE_PASS_SSH="n"
-if [ "$SSH_METHOD" != "none" ]; then
-    if ask_yn "Disable SSH password authentication after key is added?" "y"; then
-        DISABLE_PASS_SSH="y"
-    fi
-fi
-
 # ── Optional Components ──────────────────────────────────────────
 echo ""
 echo -e "${BOLD}── Components ──${RESET}"
@@ -140,7 +133,6 @@ echo -e "  Hostname:   ${GREEN}${NEW_HOST}${RESET}"
 echo -e "  Timezone:   ${GREEN}${NEW_TZ}${RESET}"
 [ "$SSH_METHOD" = "github" ] && echo -e "  SSH Key:    ${GREEN}from github.com/${GH_USER}${RESET}"
 [ "$SSH_METHOD" = "paste" ] && echo -e "  SSH Key:    ${GREEN}manual paste${RESET}"
-[ "$DISABLE_PASS_SSH" = "y" ] && echo -e "  SSH Pass:   ${YELLOW}will be disabled${RESET}"
 echo -e "  Docker:     $([ "$INSTALL_DOCKER" = "y" ] && echo "${GREEN}yes${RESET}" || echo "${YELLOW}no${RESET}")"
 echo -e "  Claude:     $([ "$INSTALL_CLAUDE" = "y" ] && echo "${GREEN}yes${RESET}" || echo "${YELLOW}no${RESET}")"
 echo -e "  Tailscale:  $([ "$INSTALL_TAILSCALE" = "y" ] && echo "${GREEN}yes${RESET}" || echo "${YELLOW}no${RESET}")"
@@ -162,7 +154,6 @@ fi
 TOTAL_STEPS=4  # update, hostname/tz, nixbash, cleanup — always present
 [ "$CREATE_USER" = "y" ] && TOTAL_STEPS=$((TOTAL_STEPS + 1))
 [ "$SSH_METHOD" != "none" ] && TOTAL_STEPS=$((TOTAL_STEPS + 1))
-[ "$DISABLE_PASS_SSH" = "y" ] && TOTAL_STEPS=$((TOTAL_STEPS + 1))
 [ "$INSTALL_TOOLS" = "y" ] && TOTAL_STEPS=$((TOTAL_STEPS + 1))
 [ "$INSTALL_DOCKER" = "y" ] && TOTAL_STEPS=$((TOTAL_STEPS + 1))
 [ "$INSTALL_TAILSCALE" = "y" ] && TOTAL_STEPS=$((TOTAL_STEPS + 1))
@@ -253,18 +244,6 @@ if [ "$SSH_METHOD" != "none" ]; then
     chmod 700 "$SSH_DIR"
     chmod 600 "${SSH_DIR}/authorized_keys"
     ok "SSH key configured for ${TARGET_USER}"
-fi
-
-# ── Disable SSH password auth ─────────────────────────────────────
-if [ "$DISABLE_PASS_SSH" = "y" ]; then
-    next_step "Harden SSH"
-    info "Disabling SSH password authentication in /etc/ssh/sshd_config..."
-    sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
-    sed -i 's/^#\?ChallengeResponseAuthentication.*/ChallengeResponseAuthentication no/' /etc/ssh/sshd_config
-    info "Restarting SSH service..."
-    systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || true
-    ok "SSH password authentication disabled — key-only access from now on"
-    warn "Make sure your SSH key works before you disconnect!"
 fi
 
 # ── Full tool suite ───────────────────────────────────────────────
@@ -400,7 +379,6 @@ echo -e "  ✅ System updated and upgraded"
 echo -e "  ✅ Hostname: ${GREEN}$(hostname)${RESET} | Timezone: ${GREEN}${NEW_TZ}${RESET}"
 [ "$CREATE_USER" = "y" ] && echo -e "  ✅ User created: ${GREEN}${NEW_USER}${RESET} (sudo NOPASSWD)"
 [ "$SSH_METHOD" != "none" ] && echo -e "  ✅ SSH key imported"
-[ "$DISABLE_PASS_SSH" = "y" ] && echo -e "  ✅ SSH password auth: ${YELLOW}disabled${RESET}"
 [ "$INSTALL_TOOLS" = "y" ] && echo -e "  ✅ 50+ sysadmin tools installed"
 [ "$INSTALL_DOCKER" = "y" ] && echo -e "  ✅ Docker: ${GREEN}$(docker --version 2>/dev/null | head -1 || echo 'installed')${RESET}"
 [ "$INSTALL_TAILSCALE" = "y" ] && echo -e "  ✅ Tailscale: ${GREEN}$(tailscale ip -4 2>/dev/null || echo 'installed — run tailscale up')${RESET}"
