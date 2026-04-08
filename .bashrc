@@ -17,9 +17,16 @@
 ######################################################################
 
 # Package management (works with or without sudo)
-alias reboot='command -v sudo >/dev/null && sudo reboot || reboot'
-#alias si='command -v sudo >/dev/null && sudo apt install -y || apt install -y'
+# FIX: function instead of alias -- alias fell through if sudo existed but failed (expired creds, policy, etc.)
+reboot() {
+  if command -v sudo >/dev/null 2>&1; then
+    sudo reboot
+  else
+    command reboot
+  fi
+}
 
+# FIX: si is a function because aliases don't expand $@ reliably
 si() {
   if command -v sudo >/dev/null 2>&1; then
     sudo apt install -y "$@"
@@ -28,26 +35,36 @@ si() {
   fi
 }
 
-alias aa='(command -v sudo >/dev/null && sudo apt update && sudo apt upgrade -y && sudo apt autoremove -y) || (apt update && apt upgrade -y && apt autoremove -y)'
+# FIX: aa is a function so sudo logic applies to each step, not just the first
+# FIX: uses array instead of word-splitting "sudo apt" string -- avoids IFS fragility
+aa() {
+  local -a APT=(apt)
+  command -v sudo >/dev/null 2>&1 && APT=(sudo apt)
+  "${APT[@]}" update && "${APT[@]}" upgrade -y && "${APT[@]}" autoremove -y
+}
+
 alias eh='command -v sudo >/dev/null && sudo nano /etc/hosts || nano /etc/hosts'
 
 # System info
 alias neo='fastfetch 2>/dev/null || neofetch 2>/dev/null || screenfetch 2>/dev/null || echo "Install fastfetch: sudo apt install fastfetch"'
-alias ip='ip a'
-alias df='df -hT | grep -v tmpfs'
+# FIX: renamed from `ip` to `ipa` -- `ip` shadowed the binary, breaking `ip route`, `ip link`, etc.
+alias ipa='ip a'
+# FIX: df as function -- alias with pipe mangled any user-supplied arguments
+df() { command df -hT "$@" | grep -v tmpfs; }
 alias myip='curl -s ifconfig.me'
 alias temp='vcgencmd measure_temp 2>/dev/null || ([ -f /sys/class/thermal/thermal_zone0/temp ] && echo "temp=$(( $(cat /sys/class/thermal/thermal_zone0/temp) / 1000 ))C") || echo "N/A"'
 
-#claude code
+# Claude Code
 alias ccc='claude --dangerously-skip-permissions'
 alias cccc='claude --dangerously-skip-permissions -c'
 
 # Quick launchers
 alias p='cd ~/Projects'
-alias 1='ping -c 100000000 1.1.1.1'
+# FIX: renamed `1` to `pinglong` -- single-char alias with 100M pings is chaotic neutral
+# FIX: uses `command ping` to bypass the -c 5 alias
+alias pinglong='command ping 1.1.1.1'
 alias ms='msfconsole'
 alias gem='gemini --yolo'
-alias gitc='git add -A && git commit'
 alias installclaude='curl -fsSL https://claude.ai/install.sh | bash'
 alias installgemini='npm install -g @google/gemini-cli'
 
@@ -68,7 +85,8 @@ alias lt='ls -lath'
 
 # File operations
 alias cls='clear && ls'
-alias mkdir='mkdir -pv'
+# FIX: renamed from `mkdir` to `mkp` -- overriding mkdir broke scripts expecting plain mkdir behavior
+alias mkp='mkdir -pv'
 alias wget='wget -c'
 alias tarx='tar -xvzf'
 alias tarc='tar -cvzf'
@@ -86,15 +104,28 @@ alias reload='source ~/.bashrc'
 alias vi='nano'
 alias svi='command -v sudo >/dev/null && sudo nano || nano'
 
+# Git
+# FIX: gitc is now a function -- the alias had no -m flag and no $@ so it dropped into editor with no message
+# Uses "WIP YYYY-MM-DD" as default message if none supplied
+gitc() { git add -A && git commit -m "${*:-WIP $(date +%F)}"; }
+alias gs='git status'
+alias glog='git log --oneline --graph --decorate -20'
+
 # Process and monitoring
-alias top='btop 2>/dev/null || htop -t 2>/dev/null || top'
+# FIX: uses `command top` as final fallback -- bare `top` caused infinite alias recursion
+alias top='btop 2>/dev/null || htop -t 2>/dev/null || command top'
 alias htop='htop -t'
-alias du='du -sh * | sort -h'
+# FIX: `du` alias used glob `*` which ignored args, caused glob explosion, and broke arg passing
+# Renamed to duh() function -- raw `du` command is left untouched
+duh() {
+  du -sh "$@" 2>/dev/null | sort -h
+}
 alias memtop='ps aux --sort=-%mem | head -n 15'
 alias cputop='ps aux --sort=-%cpu | head -n 15'
 alias ports='netstat -tuln 2>/dev/null || ss -tuln'
-alias psg='ps aux | grep'
-alias myprocesses='ps -ef | grep $USER'
+# FIX: psg and myprocesses had classic grep self-match issue -- grep always found itself in results
+psg() { ps aux | grep -i --color=auto "$@" | grep -v grep; }
+alias myprocesses='ps -ef | grep -v grep | grep $USER'
 alias io='sudo iotop -o 2>/dev/null || echo "Install iotop: sudo apt install iotop"'
 alias log='tail -f /var/log/syslog'
 alias authlog='sudo tail -f /var/log/auth.log'
@@ -107,6 +138,13 @@ alias urlencode='python3 -c "import sys, urllib.parse as ul; print(ul.quote_plus
 alias uuid='python3 -c "import uuid; print(uuid.uuid4())"'
 alias timestamp='date +%s'
 alias iso8601='date -Iseconds'
+
+# Tailscale shortcuts
+alias ts='tailscale status'
+alias tsip='tailscale ip -4'
+
+# Find shortcuts
+alias ff='find . -name'
 
 ######################################################################
 # ENHANCED TOOLS (aliases set if installed)
@@ -145,10 +183,10 @@ if command -v rg >/dev/null 2>&1; then
     alias rg='rg --smart-case'
 fi
 
-# Grep with colors
-alias grep='grep --color=auto -n'
-alias fgrep='fgrep --color=auto -n'
-alias egrep='egrep --color=auto -n'
+# FIX: dropped `-n` from grep -- adding line numbers breaks scripts expecting raw grep output
+alias grep='grep --color=auto'
+alias fgrep='fgrep --color=auto'
+alias egrep='egrep --color=auto'
 
 ######################################################################
 # HISTORY & SHELL OPTIONS
@@ -167,7 +205,8 @@ shopt -s dirspell
 shopt -s autocd 2>/dev/null
 shopt -s globstar 2>/dev/null
 
-PROMPT_COMMAND="history -a"
+# FIX: use append pattern instead of direct assignment -- direct assignment clobbers anything else using PROMPT_COMMAND
+PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND; }history -a"
 
 # Better history search
 if [[ $- == *i* ]]; then
@@ -190,7 +229,7 @@ BOLD_YELLOW="\[\033[1;33m\]"
 BOLD_CYAN="\[\033[1;36m\]"
 RESET="\[\033[0m\]"
 
-PS1="${BOLD_GREEN}\u${RESET}${RED}@${RESET}${BOLD_YELLOW}\h${RESET} ${BOLD_BLUE}\w${RESET}${BOLD_CYAN} ➜ ${RESET}"
+PS1="${BOLD_GREEN}\u${RESET}${RED}@${RESET}${BOLD_YELLOW}\h${RESET} ${BOLD_BLUE}\w${RESET}${BOLD_CYAN} > ${RESET}"
 
 # Terminal title
 case "$TERM" in
@@ -204,17 +243,20 @@ esac
 ######################################################################
 
 # Extract any archive format
+# FIX: added .tar.xz and .xz which were missing
 extract() {
     if [ -f "$1" ]; then
         case "$1" in
             *.tar.bz2)   tar xjf "$1"     ;;
             *.tar.gz)    tar xzf "$1"     ;;
+            *.tar.xz)    tar xJf "$1"     ;;
             *.bz2)       bunzip2 "$1"     ;;
             *.rar)       unrar e "$1"     ;;
             *.gz)        gunzip "$1"      ;;
             *.tar)       tar xf "$1"      ;;
             *.tbz2)      tar xjf "$1"     ;;
             *.tgz)       tar xzf "$1"     ;;
+            *.xz)        unxz "$1"        ;;
             *.zip)       unzip "$1"       ;;
             *.Z)         uncompress "$1"  ;;
             *.7z)        7z x "$1"        ;;
@@ -235,6 +277,24 @@ cdd() {
     builtin cd "$@" && ls -la
 }
 
+# Check what is listening on a given port
+# Usage: listening 8080
+listening() {
+    ss -tlnp | grep ":${1}"
+}
+
+# rsync push: push local file/dir to remote
+# Usage: push ./localfile user@host:/remote/path
+push() {
+    rsync -avz --progress "$1" "$2"
+}
+
+# rsync pull: pull remote file/dir to current directory
+# Usage: pull user@host:/remote/path/file
+pull() {
+    rsync -avz --progress "$1" .
+}
+
 ######################################################################
 # SYSTEM BANNER
 ######################################################################
@@ -252,7 +312,6 @@ print_system_banner() {
 
     HOST=$(hostname)
     IPs=$(hostname -I 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | xargs || echo "N/A")
-    EXTERNAL_IP=$(timeout 3 curl -s ifconfig.me 2>/dev/null || echo "N/A")
     UPTIME=$(uptime -p 2>/dev/null || echo "N/A")
     LOAD=$(cut -d " " -f1-3 /proc/loadavg 2>/dev/null || echo "N/A")
     DISK=$(df -h / 2>/dev/null | awk 'NR==2 {print $5 " used on " $6}' || echo "N/A")
@@ -271,24 +330,45 @@ print_system_banner() {
         TEMP="N/A"
     fi
 
-    # Tailscale status
-    if command -v tailscale >/dev/null 2>&1; then
-        TS_IP=$(tailscale ip -4 2>/dev/null || echo "")
-        TS_STATUS=$(tailscale status --self 2>/dev/null | awk '{print $NF}' || echo "")
-        if [ -n "$TS_IP" ]; then
-            TAILSCALE="${TS_IP} (${TS_STATUS:-unknown})"
+    # FIX: cache external IP to /tmp with 5-min TTL -- avoids curl on every shell open
+    # Skip entirely on SSH connections (light mode)
+    if [ -n "$SSH_CONNECTION" ]; then
+        EXTERNAL_IP="(skipped on SSH)"
+    else
+        CACHE_FILE="/tmp/.nixbash_ext_ip"
+        if [ -f "$CACHE_FILE" ] && [ -n "$(find "$CACHE_FILE" -mmin -5 2>/dev/null)" ]; then
+            EXTERNAL_IP=$(cat "$CACHE_FILE")
         else
-            TAILSCALE="not connected"
+            EXTERNAL_IP=$(timeout 2 curl -s ifconfig.me 2>/dev/null || echo "offline")
+            echo "$EXTERNAL_IP" > "$CACHE_FILE"
+        fi
+    fi
+
+    # Tailscale status -- skip heavy status check on SSH connections
+    if command -v tailscale >/dev/null 2>&1; then
+        if [ -n "$SSH_CONNECTION" ]; then
+            TS_IP=$(tailscale ip -4 2>/dev/null || echo "")
+            TAILSCALE="${TS_IP:-not connected}"
+        else
+            TS_IP=$(tailscale ip -4 2>/dev/null || echo "")
+            TS_STATUS=$(tailscale status --self 2>/dev/null | awk '{print $NF}' || echo "")
+            if [ -n "$TS_IP" ]; then
+                TAILSCALE="${TS_IP} (${TS_STATUS:-unknown})"
+            else
+                TAILSCALE="not connected"
+            fi
         fi
     else
         TAILSCALE="Not installed"
     fi
 
-    # Docker status
-    if command -v docker >/dev/null 2>&1; then
+    # Docker status -- skip on SSH connections
+    if [ -z "$SSH_CONNECTION" ] && command -v docker >/dev/null 2>&1; then
         DOCKER_RUNNING=$(docker ps -q 2>/dev/null | wc -l)
         DOCKER_TOTAL=$(docker ps -a -q 2>/dev/null | wc -l)
         DOCKER_STATUS="${DOCKER_RUNNING} running / ${DOCKER_TOTAL} total"
+    elif command -v docker >/dev/null 2>&1; then
+        DOCKER_STATUS="(skipped on SSH)"
     else
         DOCKER_STATUS="Not installed"
     fi
@@ -308,7 +388,7 @@ print_system_banner() {
     fi
 
     echo -e "${BOLD}${BLUE}****************************************************${RESET}"
-    echo -e "${BOLD}${CYAN}*  ⚡ NixBash System Status - $HOST"
+    echo -e "${BOLD}${CYAN}*  NixBash System Status - $HOST"
     echo -e "${BOLD}${BLUE}****************************************************${RESET}"
     echo -e "${WHITE}*  Host:        ${GREEN}$HOST${RESET}"
     echo -e "${WHITE}*  IPs:         ${CYAN}$IPs${RESET}"
