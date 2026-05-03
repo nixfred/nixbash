@@ -10,7 +10,7 @@ Fast, clean bash environment for Linux servers. One command to go from fresh ins
 curl -sL https://raw.githubusercontent.com/nixfred/nixbash/main/install.sh | bash && source ~/.bashrc
 ```
 
-**Interactive** -- full server provisioning with guided setup (run as root):
+**Interactive** -- full server provisioning with guided setup on apt-based systems (run as root):
 
 ```bash
 curl -sL https://raw.githubusercontent.com/nixfred/nixbash/main/setup.sh | sudo bash
@@ -56,16 +56,16 @@ The interactive setup walks you through:
 - `psg <pattern>` -- find processes (excludes grep from results)
 - `duh [path]` -- sorted disk usage summary
 - `gitc [message]` -- git add all + commit (defaults to "WIP YYYY-MM-DD")
-- `aa` -- full system update (apt update + upgrade + autoremove)
-- `si <packages>` -- quick install with sudo detection
+- `aa` -- full system update (apt, dnf, or pacman)
+- `si <packages>` -- quick install with sudo detection (apt, dnf, or pacman)
 
 ## Alias Reference
 
 | Alias | Command | Description |
 |-------|---------|-------------|
 | **Package Management** |||
-| `aa` | `apt update && upgrade && autoremove` | Full system update (function) |
-| `si` | `apt install -y` | Quick install (function) |
+| `aa` | `apt/dnf/pacman update flow` | Full system update (function) |
+| `si` | `apt/dnf/pacman install` | Quick install (function) |
 | **Navigation** |||
 | `..` | `cd ..` | Up one |
 | `...` | `cd ../..` | Up two |
@@ -130,7 +130,8 @@ source ~/.bashrc
 - Linux with bash
 - `curl` (for install)
 - `apt`, `dnf`, or `pacman` (for tool installation)
-- Works on: Ubuntu, Debian, Raspberry Pi OS, Fedora, Arch, and derivatives
+- `install.sh` works on: Ubuntu, Debian, Raspberry Pi OS, Fedora, Arch, and derivatives
+- `setup.sh` currently supports apt-based systems only
 
 ## License
 
