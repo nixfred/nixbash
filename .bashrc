@@ -20,7 +20,7 @@
 # Without this, `source ~/.bashrc` in a shell that loaded the OLD .bashrc
 # fails because bash expands the old alias before parsing the new function
 # definition, e.g. `si()` becomes `sudo apt install -y()` -> syntax error.
-unalias reboot si aa df du psg 2>/dev/null
+unalias reboot si aa df du psg eh svi 2>/dev/null
 
 # Package management (works with or without sudo)
 # FIX: function instead of alias -- alias fell through if sudo existed but failed (expired creds, policy, etc.)
@@ -49,7 +49,13 @@ aa() {
   "${APT[@]}" update && "${APT[@]}" upgrade -y && "${APT[@]}" autoremove -y
 }
 
-alias eh='command -v sudo >/dev/null && sudo nano /etc/hosts || nano /etc/hosts'
+eh() {
+  if command -v sudo >/dev/null 2>&1; then
+    sudo nano /etc/hosts
+  else
+    nano /etc/hosts
+  fi
+}
 
 # System info
 alias neo='fastfetch 2>/dev/null || neofetch 2>/dev/null || screenfetch 2>/dev/null || echo "Install fastfetch: sudo apt install fastfetch"'
@@ -108,7 +114,13 @@ alias now='date +"%T"'
 alias nowtime='date +"%d-%m-%Y %T"'
 alias reload='source ~/.bashrc'
 alias vi='nano'
-alias svi='command -v sudo >/dev/null && sudo nano || nano'
+svi() {
+  if command -v sudo >/dev/null 2>&1; then
+    sudo nano "$@"
+  else
+    nano "$@"
+  fi
+}
 
 # Git
 # FIX: gitc is now a function -- the alias had no -m flag and no $@ so it dropped into editor with no message
