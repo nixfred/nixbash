@@ -357,9 +357,14 @@ print_system_banner() {
             TAILSCALE="${TS_IP:-not connected}"
         else
             TS_IP=$(tailscale ip -4 2>/dev/null || echo "")
-            TS_STATUS=$(tailscale status --self 2>/dev/null | awk '{print $NF}' || echo "")
+            # Self line = the one whose first field is our own IP; $5 is the
+            # connection state. Do NOT use `tailscale status --self` — some
+            # versions ignore the flag and dump the full peer list, which used
+            # to flood the banner with one "$NF" per line (-, ago, check:...).
+            TS_STATE=$(tailscale status 2>/dev/null | awk -v ip="$TS_IP" '$1==ip {gsub(/[;,]/,"",$5); print $5; exit}')
+            case "$TS_STATE" in ""|"-") TS_STATE="" ;; esac
             if [ -n "$TS_IP" ]; then
-                TAILSCALE="${TS_IP} (${TS_STATUS:-unknown})"
+                TAILSCALE="${TS_IP}${TS_STATE:+ ($TS_STATE)}"
             else
                 TAILSCALE="not connected"
             fi
