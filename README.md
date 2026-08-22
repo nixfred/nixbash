@@ -1,8 +1,22 @@
+<div align="center">
+
+<img src="assets/readme/nixbash-hero.svg" alt="Clean NixBash terminal showing server health, a concise prompt, and modern command-line tools" width="100%">
+
 # NixBash
+
+### A fresh Linux server should feel finished in one command.
+
+[![Bash](https://img.shields.io/badge/shell-Bash-4EAA25?style=for-the-badge&logo=gnubash&logoColor=white)](.bashrc)
+[![Linux](https://img.shields.io/badge/Linux-Ubuntu%20·%20Debian%20·%20Fedora%20·%20Arch-FCC624?style=for-the-badge&logo=linux&logoColor=black)](#requirements)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
+
+</div>
 
 Fast, clean bash environment for Linux servers. One command to go from fresh install to fully provisioned.
 
 ## Install
+
+<img src="assets/readme/install-paths.svg" alt="Automatic shell-only installation compared with interactive full-server provisioning" width="100%">
 
 **Automatic** -- shell environment only, no prompts, safe for scripted installs:
 
@@ -30,11 +44,15 @@ The interactive setup walks you through:
 
 **System Banner** -- hostname, IPs (cached external IP), uptime, load, memory, disk, temp, Tailscale, Docker status, SSH fail attempts on every login. Heavy checks are skipped on SSH connections for fast remote shell startup.
 
+<img src="assets/readme/banner-anatomy.svg" alt="Login banner groups server identity, health, services, and security signals" width="100%">
+
 **Prompt** -- `user@host ~/dir >` with colors (green user, yellow host, blue dir, cyan arrow)
 
 **70+ Aliases and Functions** -- package management, navigation, file ops, git, monitoring, networking
 
 **Modern CLI Tools** (auto-installed):
+
+<img src="assets/readme/toolbelt.svg" alt="Modern command-line tools for listing, viewing, finding, navigation, search, monitoring, inspection, disk usage, and directory structure" width="100%">
 - `eza` -- better `ls` with icons
 - `bat` -- better `cat` with syntax highlighting
 - `fzf` -- fuzzy finder
@@ -102,6 +120,8 @@ The interactive setup walks you through:
 | `hg` | `history \| grep` | Search history |
 
 ## Local Overrides
+
+<img src="assets/readme/safe-customization.svg" alt="Managed bashrc sourcing a separate machine-specific bashrc local file that survives updates" width="100%">
 
 Add machine-specific config (SSH aliases, API keys, custom paths) to:
 
