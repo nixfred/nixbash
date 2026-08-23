@@ -62,12 +62,17 @@ if [ "$(id -u)" -ne 0 ]; then
     fail "This script must be run as root (sudo bash setup.sh)"
 fi
 
+# ── Require apt-based distro for full provisioning ─────────────────
+if ! command -v apt-get >/dev/null 2>&1; then
+    fail "setup.sh currently supports apt-based systems only. On Fedora/Arch, use install.sh for the shell environment and provision the rest manually."
+fi
+
 START_TIME=$(date +%s)
 
 echo ""
 echo -e "${BOLD}${CYAN}⚡ NixBash Interactive Setup${RESET}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-echo -e "  Full server provisioning for fresh Linux boxes"
+echo -e "  Full server provisioning for fresh apt-based Linux boxes"
 echo -e "  ${DIM}Running as root on $(hostname) — $(date '+%Y-%m-%d %H:%M:%S %Z')${RESET}"
 echo -e "  For shell-only install, use ${BOLD}install.sh${RESET} instead"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"

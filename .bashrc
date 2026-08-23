@@ -20,7 +20,7 @@
 # Without this, `source ~/.bashrc` in a shell that loaded the OLD .bashrc
 # fails because bash expands the old alias before parsing the new function
 # definition, e.g. `si()` becomes `sudo apt install -y()` -> syntax error.
-unalias reboot si aa df du psg 2>/dev/null
+unalias reboot si aa df du psg gitc 2>/dev/null
 
 # Package management (works with or without sudo)
 # FIX: function instead of alias -- alias fell through if sudo existed but failed (expired creds, policy, etc.)
@@ -32,21 +32,68 @@ reboot() {
   fi
 }
 
-# FIX: si is a function because aliases don't expand $@ reliably
-si() {
-  if command -v sudo >/dev/null 2>&1; then
-    sudo apt install -y "$@"
+_nixbash_pkg_manager() {
+  if command -v apt-get >/dev/null 2>&1; then
+    printf '%s\n' apt
+  elif command -v dnf >/dev/null 2>&1; then
+    printf '%s\n' dnf
+  elif command -v pacman >/dev/null 2>&1; then
+    printf '%s\n' pacman
   else
-    apt install -y "$@"
+    return 1
   fi
 }
 
+# FIX: si is a function because aliases don't expand $@ reliably
+# FIX: support apt, dnf, and pacman to match install.sh and README claims
+si() {
+  local PM
+  local -a CMD=()
+
+  PM=$(_nixbash_pkg_manager) || {
+    echo "No supported package manager found (expected apt, dnf, or pacman)" >&2
+    return 1
+  }
+
+  command -v sudo >/dev/null 2>&1 && CMD=(sudo)
+
+  case "$PM" in
+    apt) CMD+=(apt install -y) ;;
+    dnf) CMD+=(dnf install -y) ;;
+    pacman) CMD+=(pacman -S --noconfirm --needed) ;;
+  esac
+
+  "${CMD[@]}" "$@"
+}
+
 # FIX: aa is a function so sudo logic applies to each step, not just the first
-# FIX: uses array instead of word-splitting "sudo apt" string -- avoids IFS fragility
+# FIX: uses arrays instead of word-splitting "sudo apt" strings -- avoids IFS fragility
+# FIX: support apt, dnf, and pacman instead of assuming Debian everywhere
 aa() {
-  local -a APT=(apt)
-  command -v sudo >/dev/null 2>&1 && APT=(sudo apt)
-  "${APT[@]}" update && "${APT[@]}" upgrade -y && "${APT[@]}" autoremove -y
+  local PM
+  local -a CMD=()
+
+  PM=$(_nixbash_pkg_manager) || {
+    echo "No supported package manager found (expected apt, dnf, or pacman)" >&2
+    return 1
+  }
+
+  command -v sudo >/dev/null 2>&1 && CMD=(sudo)
+
+  case "$PM" in
+    apt)
+      CMD+=(apt)
+      "${CMD[@]}" update && "${CMD[@]}" upgrade -y && "${CMD[@]}" autoremove -y
+      ;;
+    dnf)
+      CMD+=(dnf)
+      "${CMD[@]}" upgrade -y && "${CMD[@]}" autoremove -y
+      ;;
+    pacman)
+      CMD+=(pacman)
+      "${CMD[@]}" -Syu --noconfirm
+      ;;
+  esac
 }
 
 alias eh='command -v sudo >/dev/null && sudo nano /etc/hosts || nano /etc/hosts'
@@ -168,7 +215,7 @@ if command -v eza >/dev/null 2>&1; then
     alias ll='eza -la --icons --group-directories-first'
     alias lt='eza --tree --icons --level=2'
 elif [ -x /usr/bin/dircolors ]; then
-    test -r ~/.dircolors && eval "$(dircolors -b ~/.dircolors)" || eval "$(dircolors -b)"
+    test -r ~/.dircolors && eval "$(/usr/bin/dircolors -b ~/.dircolors)" || eval "$(/usr/bin/dircolors -b)"
     alias ls='ls --color=auto --group-directories-first'
     alias ll='ls -alFh --color=auto --group-directories-first'
     alias la='ls -Ah --color=auto --group-directories-first'
