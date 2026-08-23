@@ -281,12 +281,38 @@ if [ "$SSH_METHOD" != "none" ]; then
                 ok "SSH key imported from GitHub user '${GH_USER}'"
             else
                 info "ssh-import-id failed, trying direct curl fallback..."
-                KEY_COUNT=$(curl -sL "https://github.com/${GH_USER}.keys" | tee -a "${SSH_DIR}/authorized_keys" | wc -l)
-                ok "Imported ${KEY_COUNT} SSH key(s) from GitHub via curl"
+                KEY_FILE=$(mktemp)
+                if curl -fsSL "https://github.com/${GH_USER}.keys" -o "$KEY_FILE"; then
+                    KEY_COUNT=$(awk 'NF {count++} END {print count+0}' "$KEY_FILE")
+                    if [ "$KEY_COUNT" -gt 0 ]; then
+                        cat "$KEY_FILE" >> "${SSH_DIR}/authorized_keys"
+                        ok "Imported ${KEY_COUNT} SSH key(s) from GitHub via curl"
+                    else
+                        rm -f "$KEY_FILE"
+                        fail "No public SSH keys found for GitHub user '${GH_USER}'"
+                    fi
+                else
+                    rm -f "$KEY_FILE"
+                    fail "Failed to fetch public SSH keys from github.com/${GH_USER}.keys"
+                fi
+                rm -f "$KEY_FILE"
             fi
         else
-            KEY_COUNT=$(curl -sL "https://github.com/${GH_USER}.keys" | tee -a "${SSH_DIR}/authorized_keys" | wc -l)
-            ok "Imported ${KEY_COUNT} SSH key(s) from GitHub"
+            KEY_FILE=$(mktemp)
+            if curl -fsSL "https://github.com/${GH_USER}.keys" -o "$KEY_FILE"; then
+                KEY_COUNT=$(awk 'NF {count++} END {print count+0}' "$KEY_FILE")
+                if [ "$KEY_COUNT" -gt 0 ]; then
+                    cat "$KEY_FILE" >> "${SSH_DIR}/authorized_keys"
+                    ok "Imported ${KEY_COUNT} SSH key(s) from GitHub"
+                else
+                    rm -f "$KEY_FILE"
+                    fail "No public SSH keys found for GitHub user '${GH_USER}'"
+                fi
+            else
+                rm -f "$KEY_FILE"
+                fail "Failed to fetch public SSH keys from github.com/${GH_USER}.keys"
+            fi
+            rm -f "$KEY_FILE"
         fi
     elif [ "$SSH_METHOD" = "paste" ]; then
         info "Adding provided public key to authorized_keys..."

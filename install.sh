@@ -49,25 +49,43 @@ fi
 step 2 "Detect Package Manager"
 
 PKG_MANAGER="none"
+run_install_cmd() {
+    local success_pattern="$1"
+    shift
+
+    local log_file
+    log_file=$(mktemp)
+
+    if "$@" >"$log_file" 2>&1; then
+        grep -E "$success_pattern" "$log_file" || tail -n 3 "$log_file"
+        rm -f "$log_file"
+        return 0
+    else
+        tail -n 10 "$log_file" >&2
+        rm -f "$log_file"
+        return 1
+    fi
+}
+
 install_pkg() {
     local pkg="$1"
     if command -v apt-get >/dev/null 2>&1; then
         if command -v sudo >/dev/null 2>&1; then
-            sudo apt-get install -y "$pkg" 2>&1 | grep -E "^(Setting up|is already)" || true
+            run_install_cmd "^(Setting up|is already)" sudo apt-get install -y "$pkg"
         else
-            apt-get install -y "$pkg" 2>&1 | grep -E "^(Setting up|is already)" || true
+            run_install_cmd "^(Setting up|is already)" apt-get install -y "$pkg"
         fi
     elif command -v dnf >/dev/null 2>&1; then
         if command -v sudo >/dev/null 2>&1; then
-            sudo dnf install -y "$pkg" 2>&1 | grep -E "^(Installing|already installed)" || true
+            run_install_cmd "^(Installing|already installed)" sudo dnf install -y "$pkg"
         else
-            dnf install -y "$pkg" 2>&1 | grep -E "^(Installing|already installed)" || true
+            run_install_cmd "^(Installing|already installed)" dnf install -y "$pkg"
         fi
     elif command -v pacman >/dev/null 2>&1; then
         if command -v sudo >/dev/null 2>&1; then
-            sudo pacman -S --noconfirm "$pkg" 2>&1 | grep -E "^(installing|warning)" || true
+            run_install_cmd "^(installing|warning)" sudo pacman -S --noconfirm --needed "$pkg"
         else
-            pacman -S --noconfirm "$pkg" 2>&1 | grep -E "^(installing|warning)" || true
+            run_install_cmd "^(installing|warning)" pacman -S --noconfirm --needed "$pkg"
         fi
     else
         return 1
@@ -192,11 +210,15 @@ info "Tool summary: ${GREEN}${TOOLS_INSTALLED} installed${RESET}, ${CYAN}${TOOLS
 # ── Step 5: Download NixBash .bashrc ─────────────────────────────────
 step 5 "Download NixBash Configuration"
 info "Fetching .bashrc from ${BASHRC_URL}..."
-if curl -sL "$BASHRC_URL" -o "$HOME/.bashrc"; then
-    BASHRC_SIZE=$(wc -c < "$HOME/.bashrc")
+TMP_BASHRC=$(mktemp)
+if curl -fsSL "$BASHRC_URL" -o "$TMP_BASHRC"; then
+    BASHRC_SIZE=$(wc -c < "$TMP_BASHRC")
+    [ "$BASHRC_SIZE" -gt 0 ] || fail "Downloaded .bashrc is empty"
+    mv "$TMP_BASHRC" "$HOME/.bashrc"
     ALIAS_COUNT=$(grep -c "^alias " "$HOME/.bashrc" 2>/dev/null || echo "0")
     ok "NixBash .bashrc installed (${BASHRC_SIZE} bytes, ${ALIAS_COUNT} aliases)"
 else
+    rm -f "$TMP_BASHRC"
     fail "Failed to download .bashrc from ${BASHRC_URL}"
 fi
 
