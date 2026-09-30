@@ -85,7 +85,16 @@ echo ""
 # ── User Setup ────────────────────────────────────────────────────
 echo -e "${BOLD}── User Setup ──${RESET}"
 CREATE_USER="n"
-if ask_yn "Create a new sudo user?"; then
+SET_PASS="n"
+EXISTING_USER=""
+# Rerun support: when launched with sudo from an existing account, set that
+# account up instead of asking to create one.
+INVOKER="${SUDO_USER:-}"
+if [ -n "$INVOKER" ] && [ "$INVOKER" != "root" ] && id "$INVOKER" &>/dev/null \
+   && ask_yn "Set up the current user '${INVOKER}' (already exists)?" "y"; then
+    EXISTING_USER="$INVOKER"
+    ok "Setting up existing user '${INVOKER}' -- password unchanged"
+elif ask_yn "Create (or set up) a sudo user?"; then
     CREATE_USER="y"
     # FIX: validate username BEFORE password loop, reject dangerous characters
     while true; do
@@ -102,7 +111,12 @@ if ask_yn "Create a new sudo user?"; then
             break
         fi
     done
-    while true; do
+    SET_PASS="y"
+    if id "$NEW_USER" &>/dev/null; then
+        info "User '${NEW_USER}' already exists -- it will be set up, not recreated"
+        ask_yn "Reset ${NEW_USER}'s password?" "n" || SET_PASS="n"
+    fi
+    while [ "$SET_PASS" = "y" ]; do
         NEW_PASS=$(ask_secret "Password for ${NEW_USER}")
         NEW_PASS2=$(ask_secret "Confirm password")
         if [ -z "$NEW_PASS" ]; then
@@ -124,13 +138,34 @@ NEW_HOST=$(ask "Hostname" "$CURRENT_HOST")
 
 # ── Timezone ──────────────────────────────────────────────────────
 CURRENT_TZ=$(timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || echo "UTC")
+# Numbered menu so only a real zoneinfo name can be chosen (a typed "CST"
+# once left a box on UTC).
+TZ_CHOICES=(America/New_York America/Chicago America/Denver America/Phoenix
+            America/Los_Angeles America/Anchorage Pacific/Honolulu UTC
+            Europe/London Europe/Berlin Asia/Tokyo Australia/Sydney)
+echo -e "  Timezone (current: ${BOLD}${CURRENT_TZ}${RESET})"
+echo "   0) Keep current (${CURRENT_TZ})"
+for i in "${!TZ_CHOICES[@]}"; do
+    printf '  %2d) %s\n' "$((i + 1))" "${TZ_CHOICES[$i]}"
+done
+echo "  99) Other (type a Region/City name)"
 while true; do
-    NEW_TZ=$(ask "Timezone (e.g. America/Chicago)" "$CURRENT_TZ")
-    # Abbreviations like CST are not valid zone names; timedatectl rejects them
+    TZ_PICK=$(ask "Choose timezone" "0")
+    if [ "$TZ_PICK" = "0" ]; then
+        NEW_TZ="$CURRENT_TZ"
+    elif [[ "$TZ_PICK" =~ ^[0-9]+$ ]] && [ "$TZ_PICK" -ge 1 ] && [ "$TZ_PICK" -le "${#TZ_CHOICES[@]}" ]; then
+        NEW_TZ="${TZ_CHOICES[$((TZ_PICK - 1))]}"
+    elif [ "$TZ_PICK" = "99" ]; then
+        NEW_TZ=$(ask "Timezone (e.g. America/Chicago, see: timedatectl list-timezones)")
+    else
+        warn "Pick a number from the list -- try again"
+        continue
+    fi
     if [[ "$NEW_TZ" != *..* ]] && [ -f "/usr/share/zoneinfo/${NEW_TZ}" ]; then
+        ok "Timezone: ${NEW_TZ}"
         break
     fi
-    warn "Unknown timezone '${NEW_TZ}' -- use a Region/City name like America/Chicago or America/New_York"
+    warn "Unknown timezone '${NEW_TZ}' -- try again"
 done
 
 # ── SSH Key ───────────────────────────────────────────────────────
@@ -173,6 +208,7 @@ echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━�
 echo -e "${BOLD}  Setup Summary${RESET}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 [ "$CREATE_USER" = "y" ] && echo -e "  User:       ${GREEN}${NEW_USER}${RESET} (sudo, NOPASSWD)"
+[ -n "$EXISTING_USER" ] && echo -e "  User:       ${GREEN}${EXISTING_USER}${RESET} (existing, set up in place)"
 echo -e "  Hostname:   ${GREEN}${NEW_HOST}${RESET}"
 echo -e "  Timezone:   ${GREEN}${NEW_TZ}${RESET}"
 [ "$SSH_METHOD" = "github" ] && echo -e "  SSH Key:    ${GREEN}from github.com/${GH_USER}${RESET}"
@@ -251,9 +287,13 @@ if [ "$CREATE_USER" = "y" ]; then
         ok "sudo installed"
     fi
     if id "$NEW_USER" &>/dev/null; then
-        warn "User '${NEW_USER}' already exists — updating password only"
-        # FIX: printf is a bash builtin -- no subprocess, so password never appears in ps/proc
-printf '%s:%s\n' "$NEW_USER" "$NEW_PASS" | chpasswd
+        info "User '${NEW_USER}' already exists -- setting it up"
+        usermod -aG sudo "$NEW_USER"
+        if [ "$SET_PASS" = "y" ]; then
+            # printf is a bash builtin -- password never appears in ps/proc
+            printf '%s:%s\n' "$NEW_USER" "$NEW_PASS" | chpasswd
+            ok "Password updated"
+        fi
     else
         info "Creating user '${NEW_USER}' with home directory and bash shell..."
         groupadd -f sudo
@@ -272,10 +312,17 @@ printf '%s:%s\n' "$NEW_USER" "$NEW_PASS" | chpasswd
 TARGET_HOME=$(getent passwd "$NEW_USER" | cut -d: -f6)
 [ -z "$TARGET_HOME" ] && TARGET_HOME="/home/${NEW_USER}"
 else
-    TARGET_USER=$(logname 2>/dev/null || echo "${SUDO_USER:-root}")
+    TARGET_USER="${EXISTING_USER:-${SUDO_USER:-$(logname 2>/dev/null || echo root)}}"
     # FIX: eval with user input is code injection -- use getent to safely resolve home
     TARGET_HOME=$(getent passwd "$TARGET_USER" | cut -d: -f6)
     [ -z "$TARGET_HOME" ] && TARGET_HOME="/home/${TARGET_USER}"
+fi
+
+info "Target user: ${TARGET_USER} (home: ${TARGET_HOME})"
+# Repair a ~/.ssh an earlier run left owned by root (breaks ssh-keygen)
+if [ "$TARGET_USER" != "root" ] && [ -d "${TARGET_HOME}/.ssh" ]; then
+    chown -R "${TARGET_USER}:${TARGET_USER}" "${TARGET_HOME}/.ssh"
+    chmod 700 "${TARGET_HOME}/.ssh"
 fi
 
 # ── SSH Key ───────────────────────────────────────────────────────
@@ -497,7 +544,8 @@ echo ""
 echo -e "  ${BOLD}What was done:${RESET}"
 echo -e "  ✅ System updated and upgraded"
 echo -e "  ✅ Hostname: ${GREEN}$(hostname)${RESET} | Timezone: ${GREEN}${NEW_TZ}${RESET}"
-[ "$CREATE_USER" = "y" ] && echo -e "  ✅ User created: ${GREEN}${NEW_USER}${RESET} (sudo NOPASSWD)"
+[ "$CREATE_USER" = "y" ] && echo -e "  ✅ User ready: ${GREEN}${NEW_USER}${RESET} (sudo NOPASSWD)"
+[ -n "$EXISTING_USER" ] && echo -e "  ✅ User set up: ${GREEN}${EXISTING_USER}${RESET}"
 [ "$SSH_METHOD" != "none" ] && [ "${SSH_IMPORTED:-n}" = "y" ] && echo -e "  ✅ SSH key imported"
 [ "$SSH_METHOD" != "none" ] && [ "${SSH_IMPORTED:-n}" != "y" ] && echo -e "  ⚠️  SSH key NOT imported -- see warning above"
 [ "$INSTALL_ESSENTIALS" = "y" ] && echo -e "  ✅ Essential tools installed"
@@ -507,7 +555,7 @@ echo -e "  ✅ Hostname: ${GREEN}$(hostname)${RESET} | Timezone: ${GREEN}${NEW_T
 [ "${NIXBASH_OK:-n}" = "y" ] && echo -e "  ✅ NixBash shell environment" || echo -e "  ⚠️  NixBash shell environment FAILED -- see warning above"
 [ "$INSTALL_CLAUDE" = "y" ] && echo -e "  ✅ Claude Code with aliases"
 echo ""
-[ "$CREATE_USER" = "y" ] && echo -e "  ${BOLD}Connect:${RESET}  ${CYAN}ssh ${NEW_USER}@$(hostname)${RESET}"
+echo -e "  ${BOLD}Connect:${RESET}  ${CYAN}ssh ${TARGET_USER}@$(hostname)${RESET}"
 echo -e "  ${BOLD}Activate:${RESET} ${CYAN}source ~/.bashrc${RESET} (or re-login)"
 echo ""
 echo -e "  ${YELLOW}Reboot recommended to apply all changes.${RESET}"
