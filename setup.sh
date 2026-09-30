@@ -103,8 +103,8 @@ elif ask_yn "Create (or set up) a sudo user?"; then
             warn "Username cannot be empty -- try again"
         elif [[ "$NEW_USER" =~ ^- ]]; then
             warn "Username cannot start with a dash -- try again"
-        elif [[ "$NEW_USER" =~ [^a-zA-Z0-9._-] ]]; then
-            warn "Username can only contain letters, numbers, dots, underscores, hyphens -- try again"
+        elif ! [[ "$NEW_USER" =~ ^[a-z_][a-z0-9._-]*$ ]]; then
+            warn "Username must start with a lowercase letter or _, then lowercase letters, numbers, . _ - -- try again"
         elif [ "${#NEW_USER}" -gt 32 ]; then
             warn "Username cannot exceed 32 characters -- try again"
         else
@@ -134,7 +134,11 @@ fi
 echo ""
 echo -e "${BOLD}── System ──${RESET}"
 CURRENT_HOST=$(hostname)
-NEW_HOST=$(ask "Hostname" "$CURRENT_HOST")
+while true; do
+    NEW_HOST=$(ask "Hostname" "$CURRENT_HOST")
+    [[ "$NEW_HOST" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$ ]] && break
+    warn "Hostname: letters, numbers and hyphens only (no dots/spaces, not starting or ending with -) -- try again"
+done
 
 # ── Timezone ──────────────────────────────────────────────────────
 CURRENT_TZ=$(timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || echo "UTC")
@@ -180,7 +184,11 @@ if ask_yn "Import SSH key?"; then
     SSH_CHOICE=$(ask "Choose" "1")
     if [ "$SSH_CHOICE" = "1" ]; then
         SSH_METHOD="github"
-        GH_USER=$(ask "GitHub username")
+        while true; do
+            GH_USER=$(ask "GitHub username")
+            [[ "$GH_USER" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,38})$ ]] && break
+            warn "Not a valid GitHub username -- try again"
+        done
     else
         SSH_METHOD="paste"
         SSH_KEY=$(ask "Paste your public key")
@@ -261,7 +269,7 @@ ok "System packages are up to date"
 next_step "Hostname & Timezone"
 if [ "$NEW_HOST" != "$CURRENT_HOST" ]; then
     info "Changing hostname: ${CURRENT_HOST} → ${NEW_HOST}"
-    hostnamectl set-hostname "$NEW_HOST" 2>/dev/null || echo "$NEW_HOST" > /etc/hostname
+    hostnamectl set-hostname "$NEW_HOST" 2>/dev/null || { echo "$NEW_HOST" > /etc/hostname; hostname "$NEW_HOST" 2>/dev/null || true; }
     # FIX: append 127.0.1.1 line if not present, otherwise update it
     if grep -q "127.0.1.1" /etc/hosts 2>/dev/null; then
         sed -i "s/127.0.1.1.*/127.0.1.1\t${NEW_HOST}/" /etc/hosts 2>/dev/null || true
@@ -309,12 +317,12 @@ printf '%s:%s\n' "$NEW_USER" "$NEW_PASS" | chpasswd
     ok "Sudo NOPASSWD configured — ${NEW_USER} can run any command without password"
     TARGET_USER="$NEW_USER"
     # FIX: eval with user input is code injection -- use getent to safely resolve home
-TARGET_HOME=$(getent passwd "$NEW_USER" | cut -d: -f6)
+TARGET_HOME=$(getent passwd "$NEW_USER" | cut -d: -f6 || true)
 [ -z "$TARGET_HOME" ] && TARGET_HOME="/home/${NEW_USER}"
 else
     TARGET_USER="${EXISTING_USER:-${SUDO_USER:-$(logname 2>/dev/null || echo root)}}"
     # FIX: eval with user input is code injection -- use getent to safely resolve home
-    TARGET_HOME=$(getent passwd "$TARGET_USER" | cut -d: -f6)
+    TARGET_HOME=$(getent passwd "$TARGET_USER" | cut -d: -f6 || true)
     [ -z "$TARGET_HOME" ] && TARGET_HOME="/home/${TARGET_USER}"
 fi
 

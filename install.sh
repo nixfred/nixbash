@@ -71,19 +71,19 @@ install_pkg() {
     local pkg="$1"
     if command -v apt-get >/dev/null 2>&1; then
         if command -v sudo >/dev/null 2>&1; then
-            run_install_cmd "^(Setting up|is already)" sudo apt-get install -y "$pkg"
+            run_install_cmd "^(Setting up|is already)" sudo -n apt-get install -y "$pkg"
         else
             run_install_cmd "^(Setting up|is already)" apt-get install -y "$pkg"
         fi
     elif command -v dnf >/dev/null 2>&1; then
         if command -v sudo >/dev/null 2>&1; then
-            run_install_cmd "^(Installing|already installed)" sudo dnf install -y "$pkg"
+            run_install_cmd "^(Installing|already installed)" sudo -n dnf install -y "$pkg"
         else
             run_install_cmd "^(Installing|already installed)" dnf install -y "$pkg"
         fi
     elif command -v pacman >/dev/null 2>&1; then
         if command -v sudo >/dev/null 2>&1; then
-            run_install_cmd "^(installing|warning)" sudo pacman -S --noconfirm --needed "$pkg"
+            run_install_cmd "^(installing|warning)" sudo -n pacman -S --noconfirm --needed "$pkg"
         else
             run_install_cmd "^(installing|warning)" pacman -S --noconfirm --needed "$pkg"
         fi
@@ -104,15 +104,20 @@ elif command -v pacman >/dev/null 2>&1; then
 else
     warn "No supported package manager found — tool installation will be skipped"
 fi
+# Never prompt: without root or passwordless sudo, skip packages and just install .bashrc
+if [ "$PKG_MANAGER" != "none" ] && [ "$(id -u)" -ne 0 ] && ! sudo -n true 2>/dev/null; then
+    warn "sudo needs a password here — skipping tool installs (rerun as root or with passwordless sudo)"
+    PKG_MANAGER="none"
+fi
 
 # ── Step 3: Update package lists ─────────────────────────────────────
 step 3 "Update Package Lists"
 if [ "$PKG_MANAGER" = "apt" ]; then
     info "Running apt update..."
     if command -v sudo >/dev/null 2>&1; then
-        sudo apt-get update 2>&1 | tail -1
+        (sudo -n apt-get update 2>&1 || true) | tail -1
     else
-        apt-get update 2>&1 | tail -1
+        (apt-get update 2>&1 || true) | tail -1
     fi
     ok "Package lists updated"
 elif [ "$PKG_MANAGER" != "none" ]; then
@@ -215,7 +220,7 @@ if curl -fsSL "$BASHRC_URL" -o "$TMP_BASHRC"; then
     BASHRC_SIZE=$(wc -c < "$TMP_BASHRC")
     [ "$BASHRC_SIZE" -gt 0 ] || fail "Downloaded .bashrc is empty"
     mv "$TMP_BASHRC" "$HOME/.bashrc"
-    ALIAS_COUNT=$(grep -c "^alias " "$HOME/.bashrc" 2>/dev/null || echo "0")
+    ALIAS_COUNT=$(grep -c "^alias " "$HOME/.bashrc" 2>/dev/null || true)
     ok "NixBash .bashrc installed (${BASHRC_SIZE} bytes, ${ALIAS_COUNT} aliases)"
 else
     rm -f "$TMP_BASHRC"

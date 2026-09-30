@@ -216,10 +216,10 @@ alias ff='find . -name'
 ######################################################################
 
 if command -v batcat >/dev/null 2>&1; then
-    alias cat='batcat --style=plain'
+    alias cat='batcat --style=plain --paging=never'
     alias bat='batcat'
 elif command -v bat >/dev/null 2>&1; then
-    alias cat='bat --style=plain'
+    alias cat='bat --style=plain --paging=never'
 fi
 
 if command -v eza >/dev/null 2>&1; then
@@ -400,7 +400,7 @@ print_system_banner() {
     if [ -n "$SSH_CONNECTION" ]; then
         EXTERNAL_IP="(skipped on SSH)"
     else
-        CACHE_FILE="/tmp/.nixbash_ext_ip"
+        CACHE_FILE="/tmp/.nixbash_ext_ip.$UID"
         if [ -f "$CACHE_FILE" ] && [ -n "$(find "$CACHE_FILE" -mmin -5 2>/dev/null)" ]; then
             EXTERNAL_IP=$(cat "$CACHE_FILE")
         else
