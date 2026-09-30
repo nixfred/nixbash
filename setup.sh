@@ -210,6 +210,15 @@ fi
 if ask_yn "Install essential tools (20 packages: git, vim, tmux, nmap, rsync, etc.)?" "y"; then INSTALL_ESSENTIALS="y"; else INSTALL_ESSENTIALS="n"; fi
 if ask_yn "Install extras (monitoring, fun, security — 30+ more packages)?" "n"; then INSTALL_EXTRAS="y"; else INSTALL_EXTRAS="n"; fi
 
+echo ""
+echo -e "${BOLD}── Security & System ──${RESET}"
+if ask_yn "Harden: UFW firewall (SSH only) + key-only SSH (only if a key is installed)?" "y"; then HARDEN="y"; else HARDEN="n"; fi
+if ask_yn "System basics: swap file if none, en_US.UTF-8 locale, clock sync?" "y"; then SYS_BASICS="y"; else SYS_BASICS="n"; fi
+
+GIT_NAME=""; GIT_EMAIL=""
+GIT_NAME=$(ask "Git user.name (blank = skip)")
+[ -n "$GIT_NAME" ] && GIT_EMAIL=$(ask "Git user.email")
+
 # ── Confirmation ──────────────────────────────────────────────────
 echo ""
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
@@ -226,6 +235,9 @@ echo -e "  Claude:     $([ "$INSTALL_CLAUDE" = "y" ] && echo "${GREEN}yes${RESET
 echo -e "  Tailscale:  $([ "$INSTALL_TAILSCALE" = "y" ] && echo "${GREEN}yes${RESET}" || echo "${YELLOW}no${RESET}")"
 echo -e "  Essentials: $([ "$INSTALL_ESSENTIALS" = "y" ] && echo "${GREEN}yes${RESET}" || echo "${YELLOW}no${RESET}")"
 echo -e "  Extras:     $([ "$INSTALL_EXTRAS" = "y" ] && echo "${GREEN}yes${RESET}" || echo "${YELLOW}no${RESET}")"
+echo -e "  Hardening:  $([ "$HARDEN" = "y" ] && echo "${GREEN}yes${RESET}" || echo "${YELLOW}no${RESET}")"
+echo -e "  Sys basics: $([ "$SYS_BASICS" = "y" ] && echo "${GREEN}yes${RESET}" || echo "${YELLOW}no${RESET}")"
+[ -n "$GIT_NAME" ] && echo -e "  Git:        ${GREEN}${GIT_NAME} <${GIT_EMAIL}>${RESET}"
 echo -e "  NixBash:    ${GREEN}yes (always)${RESET}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo ""
@@ -240,7 +252,9 @@ fi
 # ══════════════════════════════════════════════════════════════════
 
 # Calculate total steps dynamically
-TOTAL_STEPS=4  # update, hostname/tz, nixbash, cleanup — always present
+TOTAL_STEPS=5  # update, hostname/tz, user env, nixbash, cleanup — always present
+[ "$HARDEN" = "y" ] && TOTAL_STEPS=$((TOTAL_STEPS + 1))
+[ "$SYS_BASICS" = "y" ] && TOTAL_STEPS=$((TOTAL_STEPS + 1))
 [ "$CREATE_USER" = "y" ] && TOTAL_STEPS=$((TOTAL_STEPS + 1))
 [ "$SSH_METHOD" != "none" ] && TOTAL_STEPS=$((TOTAL_STEPS + 1))
 [ "$INSTALL_ESSENTIALS" = "y" ] && TOTAL_STEPS=$((TOTAL_STEPS + 1))
@@ -248,6 +262,12 @@ TOTAL_STEPS=4  # update, hostname/tz, nixbash, cleanup — always present
 [ "$INSTALL_DOCKER" = "y" ] && TOTAL_STEPS=$((TOTAL_STEPS + 1))
 [ "$INSTALL_TAILSCALE" = "y" ] && TOTAL_STEPS=$((TOTAL_STEPS + 1))
 [ "$INSTALL_CLAUDE" = "y" ] && TOTAL_STEPS=$((TOTAL_STEPS + 1))
+
+LOG_FILE=/var/log/nixbash-setup.log
+touch "$LOG_FILE" && chmod 600 "$LOG_FILE"
+echo "===== NixBash setup $(date '+%F %T %Z') =====" >> "$LOG_FILE"
+exec > >(tee -a "$LOG_FILE") 2>&1
+trap 'warn "Setup stopped unexpectedly at setup.sh line ${LINENO} -- full log: ${LOG_FILE}"' ERR
 
 CURRENT_STEP=0
 next_step() { CURRENT_STEP=$((CURRENT_STEP + 1)); step "$CURRENT_STEP" "$1"; }
@@ -377,6 +397,89 @@ if [ "$SSH_METHOD" != "none" ]; then
         ok "SSH key configured for ${TARGET_USER}"
     else
         warn "No SSH key installed for ${TARGET_USER} -- continuing setup"
+    fi
+fi
+
+# ── User environment ─────────────────────────────────────────────
+next_step "User Environment"
+if [ "$TARGET_USER" != "root" ]; then
+    install -d -o "$TARGET_USER" -g "$TARGET_USER" "${TARGET_HOME}/Projects"
+    ok "${TARGET_HOME}/Projects ready (the p alias goes there)"
+fi
+if [ -n "$GIT_NAME" ]; then
+    command -v git >/dev/null 2>&1 || DEBIAN_FRONTEND=noninteractive apt-get install -y git >/dev/null 2>&1 || true
+    if command -v git >/dev/null 2>&1; then
+        # Values passed as positional args so quotes in names can't break the command
+        if su - "$TARGET_USER" -c 'git config --global user.name "$1" && git config --global user.email "$2" && git config --global init.defaultBranch main' _ "$GIT_NAME" "$GIT_EMAIL"; then
+            ok "Git identity: ${GIT_NAME} <${GIT_EMAIL}>"
+        else
+            warn "Could not set git identity"
+        fi
+    else
+        warn "git not installed -- skipping git identity"
+    fi
+fi
+
+# ── System basics ─────────────────────────────────────────────────
+if [ "$SYS_BASICS" = "y" ]; then
+    next_step "Swap, Locale & Time Sync"
+    if [ -z "$(swapon --noheadings 2>/dev/null)" ] && [ ! -e /swapfile ]; then
+        RAM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
+        SWAP_MB=$(( RAM_MB * 2 )); [ "$SWAP_MB" -gt 4096 ] && SWAP_MB=4096; [ "$SWAP_MB" -lt 1024 ] && SWAP_MB=1024
+        info "No swap found -- creating ${SWAP_MB}MB /swapfile..."
+        if { fallocate -l "${SWAP_MB}M" /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count="$SWAP_MB" status=none; } \
+           && chmod 600 /swapfile && mkswap /swapfile >/dev/null 2>&1 && swapon /swapfile 2>/dev/null; then
+            grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+            ok "Swap enabled: ${SWAP_MB}MB (persistent)"
+        else
+            rm -f /swapfile
+            warn "Could not create swap (container or unsupported filesystem?) -- skipped"
+        fi
+    else
+        ok "Swap already present -- unchanged"
+    fi
+    DEBIAN_FRONTEND=noninteractive apt-get install -y locales >/dev/null 2>&1 || true
+    if command -v locale-gen >/dev/null 2>&1; then
+        locale-gen en_US.UTF-8 >/dev/null 2>&1 || true
+        grep -q '^LANG=' /etc/default/locale 2>/dev/null || update-locale LANG=en_US.UTF-8 2>/dev/null || true
+        ok "Locale: en_US.UTF-8 generated"
+    fi
+    if timedatectl set-ntp true 2>/dev/null; then
+        ok "Clock sync (NTP) enabled"
+    else
+        warn "Could not enable NTP via timedatectl -- skipped"
+    fi
+fi
+
+# ── Hardening ─────────────────────────────────────────────────────
+if [ "$HARDEN" = "y" ]; then
+    next_step "Firewall & SSH Hardening"
+    DEBIAN_FRONTEND=noninteractive apt-get install -y ufw openssh-server 2>&1 | grep -E "^(Setting up|is already)" || true
+    if command -v ufw >/dev/null 2>&1; then
+        ufw allow OpenSSH >/dev/null 2>&1 || ufw allow 22/tcp >/dev/null 2>&1 || true
+        if [ "$INSTALL_TAILSCALE" = "y" ]; then ufw allow in on tailscale0 >/dev/null 2>&1 || true; fi
+        if ufw --force enable >/dev/null 2>&1; then
+            ok "UFW firewall on: SSH allowed$([ "$INSTALL_TAILSCALE" = "y" ] && echo ", tailscale0 allowed"), everything else inbound denied"
+            if [ "$INSTALL_DOCKER" = "y" ]; then info "Note: Docker-published ports bypass UFW -- bind containers to 127.0.0.1 unless meant to be public"; fi
+        else
+            warn "Could not enable UFW (container/kernel?) -- skipped"
+        fi
+    fi
+    # Key-only SSH, but ONLY when a key is really installed, so nobody is locked out.
+    if [ -s "${TARGET_HOME}/.ssh/authorized_keys" ] && [ -d /etc/ssh/sshd_config.d ]; then
+        # 10- sorts before cloud-init's 50-, and sshd uses the first value it sees
+        printf '%s\n' "# NixBash setup: key-only SSH" "PasswordAuthentication no" \
+            "KbdInteractiveAuthentication no" "PermitRootLogin prohibit-password" > /etc/ssh/sshd_config.d/10-nixbash.conf
+        mkdir -p /run/sshd
+        if sshd -t 2>/dev/null; then
+            systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
+            ok "SSH: password login OFF, root login key-only (key found for ${TARGET_USER})"
+        else
+            rm -f /etc/ssh/sshd_config.d/10-nixbash.conf
+            warn "sshd rejected the hardening config -- reverted, SSH unchanged"
+        fi
+    else
+        warn "No SSH key in ${TARGET_HOME}/.ssh/authorized_keys -- leaving password login ON so you are not locked out"
     fi
 fi
 
@@ -560,11 +663,24 @@ echo -e "  ✅ Hostname: ${GREEN}$(hostname)${RESET} | Timezone: ${GREEN}${NEW_T
 [ "$INSTALL_EXTRAS" = "y" ] && echo -e "  ✅ Extra tools installed"
 [ "$INSTALL_DOCKER" = "y" ] && echo -e "  ✅ Docker: ${GREEN}$(docker --version 2>/dev/null | head -1 || echo 'installed')${RESET}"
 [ "$INSTALL_TAILSCALE" = "y" ] && echo -e "  ✅ Tailscale: ${GREEN}$(tailscale ip -4 2>/dev/null || echo 'installed — run tailscale up')${RESET}"
+[ "$HARDEN" = "y" ] && echo -e "  ✅ Hardening: UFW + $([ -f /etc/ssh/sshd_config.d/10-nixbash.conf ] && echo 'key-only SSH' || echo 'password SSH still ON (no key)')"
+[ "$SYS_BASICS" = "y" ] && echo -e "  ✅ Swap, locale, clock sync"
+[ -n "$GIT_NAME" ] && echo -e "  ✅ Git identity: ${GIT_NAME}"
 [ "${NIXBASH_OK:-n}" = "y" ] && echo -e "  ✅ NixBash shell environment" || echo -e "  ⚠️  NixBash shell environment FAILED -- see warning above"
 [ "$INSTALL_CLAUDE" = "y" ] && echo -e "  ✅ Claude Code with aliases"
 echo ""
 echo -e "  ${BOLD}Connect:${RESET}  ${CYAN}ssh ${TARGET_USER}@$(hostname)${RESET}"
 echo -e "  ${BOLD}Activate:${RESET} ${CYAN}source ~/.bashrc${RESET} (or re-login)"
 echo ""
-echo -e "  ${YELLOW}Reboot recommended to apply all changes.${RESET}"
+echo -e "  ${DIM}Full log: ${LOG_FILE}${RESET}"
+if [ -f /var/run/reboot-required ]; then
+    echo -e "  ${YELLOW}A reboot is required to finish updates (kernel/libraries).${RESET}"
+    if ask_yn "Reboot now?" "n"; then
+        info "Rebooting in 5 seconds (Ctrl+C to cancel)..."
+        sleep 5
+        reboot
+    fi
+else
+    echo -e "  ${YELLOW}Reboot recommended to apply all changes.${RESET}"
+fi
 echo ""
