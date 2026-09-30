@@ -124,7 +124,14 @@ NEW_HOST=$(ask "Hostname" "$CURRENT_HOST")
 
 # ── Timezone ──────────────────────────────────────────────────────
 CURRENT_TZ=$(timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || echo "UTC")
-NEW_TZ=$(ask "Timezone" "$CURRENT_TZ")
+while true; do
+    NEW_TZ=$(ask "Timezone (e.g. America/Chicago)" "$CURRENT_TZ")
+    # Abbreviations like CST are not valid zone names; timedatectl rejects them
+    if [[ "$NEW_TZ" != *..* ]] && [ -f "/usr/share/zoneinfo/${NEW_TZ}" ]; then
+        break
+    fi
+    warn "Unknown timezone '${NEW_TZ}' -- use a Region/City name like America/Chicago or America/New_York"
+done
 
 # ── SSH Key ───────────────────────────────────────────────────────
 echo ""
@@ -276,60 +283,46 @@ if [ "$SSH_METHOD" != "none" ]; then
     next_step "SSH Key Import"
     SSH_DIR="${TARGET_HOME}/.ssh"
     info "Creating SSH directory: ${SSH_DIR}"
-    mkdir -p "$SSH_DIR"
+    # Create .ssh owned by the user up front: a root-owned .ssh breaks
+    # ssh-import-id (runs as the user) and later ssh-keygen for the user.
+    install -d -m 700 -o "$TARGET_USER" -g "$TARGET_USER" "$SSH_DIR"
+    [ -f "${SSH_DIR}/authorized_keys" ] || install -m 600 -o "$TARGET_USER" -g "$TARGET_USER" /dev/null "${SSH_DIR}/authorized_keys"
+    SSH_IMPORTED=n
 
     if [ "$SSH_METHOD" = "github" ]; then
         info "Fetching public keys from github.com/${GH_USER}..."
-        DEBIAN_FRONTEND=noninteractive apt-get install -y ssh-import-id 2>&1 | grep -E "^(Setting up|is already)" || true
-        if command -v ssh-import-id >/dev/null 2>&1; then
-            if su - "$TARGET_USER" -c "ssh-import-id gh:${GH_USER}" 2>&1; then
-                ok "SSH key imported from GitHub user '${GH_USER}'"
+        KEY_FILE=$(mktemp)
+        if curl -fsSL "https://github.com/${GH_USER}.keys" -o "$KEY_FILE"; then
+            KEY_COUNT=$(awk 'NF {count++} END {print count+0}' "$KEY_FILE")
+            if [ "$KEY_COUNT" -gt 0 ]; then
+                # Append only keys not already present
+                while IFS= read -r key; do
+                    [ -n "$key" ] && ! grep -qxF "$key" "${SSH_DIR}/authorized_keys" && echo "$key" >> "${SSH_DIR}/authorized_keys"
+                done < "$KEY_FILE"
+                SSH_IMPORTED=y
+                ok "Imported ${KEY_COUNT} SSH key(s) from github.com/${GH_USER}"
             else
-                info "ssh-import-id failed, trying direct curl fallback..."
-                KEY_FILE=$(mktemp)
-                if curl -fsSL "https://github.com/${GH_USER}.keys" -o "$KEY_FILE"; then
-                    KEY_COUNT=$(awk 'NF {count++} END {print count+0}' "$KEY_FILE")
-                    if [ "$KEY_COUNT" -gt 0 ]; then
-                        cat "$KEY_FILE" >> "${SSH_DIR}/authorized_keys"
-                        ok "Imported ${KEY_COUNT} SSH key(s) from GitHub via curl"
-                    else
-                        rm -f "$KEY_FILE"
-                        fail "No public SSH keys found for GitHub user '${GH_USER}'"
-                    fi
-                else
-                    rm -f "$KEY_FILE"
-                    fail "Failed to fetch public SSH keys from github.com/${GH_USER}.keys"
-                fi
-                rm -f "$KEY_FILE"
+                warn "GitHub user '${GH_USER}' has no public SSH keys -- add one at https://github.com/settings/keys, then run: ssh-import-id gh:${GH_USER}"
             fi
         else
-            KEY_FILE=$(mktemp)
-            if curl -fsSL "https://github.com/${GH_USER}.keys" -o "$KEY_FILE"; then
-                KEY_COUNT=$(awk 'NF {count++} END {print count+0}' "$KEY_FILE")
-                if [ "$KEY_COUNT" -gt 0 ]; then
-                    cat "$KEY_FILE" >> "${SSH_DIR}/authorized_keys"
-                    ok "Imported ${KEY_COUNT} SSH key(s) from GitHub"
-                else
-                    rm -f "$KEY_FILE"
-                    fail "No public SSH keys found for GitHub user '${GH_USER}'"
-                fi
-            else
-                rm -f "$KEY_FILE"
-                fail "Failed to fetch public SSH keys from github.com/${GH_USER}.keys"
-            fi
-            rm -f "$KEY_FILE"
+            warn "Could not fetch github.com/${GH_USER}.keys (bad username or no network) -- skipping key import"
         fi
+        rm -f "$KEY_FILE"
     elif [ "$SSH_METHOD" = "paste" ]; then
         info "Adding provided public key to authorized_keys..."
         echo "$SSH_KEY" >> "${SSH_DIR}/authorized_keys"
+        SSH_IMPORTED=y
         ok "SSH key added to ${SSH_DIR}/authorized_keys"
     fi
 
-    info "Setting permissions: ${SSH_DIR} (700), authorized_keys (600)"
     chown -R "${TARGET_USER}:${TARGET_USER}" "$SSH_DIR"
     chmod 700 "$SSH_DIR"
     chmod 600 "${SSH_DIR}/authorized_keys"
-    ok "SSH key configured for ${TARGET_USER}"
+    if [ "$SSH_IMPORTED" = "y" ]; then
+        ok "SSH key configured for ${TARGET_USER}"
+    else
+        warn "No SSH key installed for ${TARGET_USER} -- continuing setup"
+    fi
 fi
 
 # ── Essential tools ───────────────────────────────────────────────
@@ -491,7 +484,8 @@ echo -e "  ${BOLD}What was done:${RESET}"
 echo -e "  ✅ System updated and upgraded"
 echo -e "  ✅ Hostname: ${GREEN}$(hostname)${RESET} | Timezone: ${GREEN}${NEW_TZ}${RESET}"
 [ "$CREATE_USER" = "y" ] && echo -e "  ✅ User created: ${GREEN}${NEW_USER}${RESET} (sudo NOPASSWD)"
-[ "$SSH_METHOD" != "none" ] && echo -e "  ✅ SSH key imported"
+[ "$SSH_METHOD" != "none" ] && [ "${SSH_IMPORTED:-n}" = "y" ] && echo -e "  ✅ SSH key imported"
+[ "$SSH_METHOD" != "none" ] && [ "${SSH_IMPORTED:-n}" != "y" ] && echo -e "  ⚠️  SSH key NOT imported -- see warning above"
 [ "$INSTALL_ESSENTIALS" = "y" ] && echo -e "  ✅ Essential tools installed"
 [ "$INSTALL_EXTRAS" = "y" ] && echo -e "  ✅ Extra tools installed"
 [ "$INSTALL_DOCKER" = "y" ] && echo -e "  ✅ Docker: ${GREEN}$(docker --version 2>/dev/null | head -1 || echo 'installed')${RESET}"
