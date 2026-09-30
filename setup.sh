@@ -408,12 +408,16 @@ if [ "$INSTALL_DOCKER" = "y" ]; then
         ok "Docker already installed: ${DOCKER_VER}"
     else
         info "Downloading and installing Docker via get.docker.com..."
-        curl -fsSL https://get.docker.com | sh 2>&1 | tail -5
-        info "Adding ${TARGET_USER} to docker group..."
-        usermod -aG docker "$TARGET_USER"
+        (curl -fsSL https://get.docker.com | sh 2>&1 || true) | tail -5
+    fi
+    if command -v docker >/dev/null 2>&1; then
         DOCKER_VER=$(docker --version 2>/dev/null | head -1)
-        ok "Docker installed: ${DOCKER_VER}"
-        ok "${TARGET_USER} can run docker without sudo (re-login required)"
+        ok "Docker ready: ${DOCKER_VER}"
+        if [ "$TARGET_USER" != "root" ]; then
+            usermod -aG docker "$TARGET_USER" && ok "${TARGET_USER} can run docker without sudo (re-login required)"
+        fi
+    else
+        warn "Docker install failed -- rerun later: curl -fsSL https://get.docker.com | sudo sh"
     fi
 fi
 
@@ -424,14 +428,19 @@ if [ "$INSTALL_TAILSCALE" = "y" ]; then
         ok "Tailscale already installed"
     else
         info "Downloading and installing Tailscale..."
-        curl -fsSL https://tailscale.com/install.sh | sh 2>&1 | tail -5
-        ok "Tailscale installed"
+        (curl -fsSL https://tailscale.com/install.sh | sh 2>&1 || true) | tail -5
+        command -v tailscale >/dev/null 2>&1 && ok "Tailscale installed" || warn "Tailscale install failed -- rerun later: curl -fsSL https://tailscale.com/install.sh | sudo sh"
     fi
-    if [ -n "$TS_KEY" ]; then
+    if ! command -v tailscale >/dev/null 2>&1; then
+        :
+    elif [ -n "$TS_KEY" ]; then
         info "Authenticating with Tailscale using provided auth key..."
-        tailscale up --authkey="$TS_KEY" --accept-routes 2>&1
-        TS_IP=$(tailscale ip -4 2>/dev/null || echo "unknown")
-        ok "Tailscale connected — IP: ${TS_IP}"
+        if tailscale up --authkey="$TS_KEY" --accept-routes 2>&1; then
+            TS_IP=$(tailscale ip -4 2>/dev/null || echo "unknown")
+            ok "Tailscale connected — IP: ${TS_IP}"
+        else
+            warn "Tailscale auth failed (expired or invalid key?) -- run 'sudo tailscale up' to connect"
+        fi
     else
         info "Tailscale installed but not authenticated"
         info "Run 'sudo tailscale up' to connect to your tailnet"
@@ -441,12 +450,17 @@ fi
 # ── NixBash (always) ─────────────────────────────────────────────
 next_step "NixBash Shell Environment"
 info "Installing NixBash for ${TARGET_USER}..."
+NIXBASH_CMD='curl -fsSL https://raw.githubusercontent.com/nixfred/nixbash/main/install.sh | bash'
 if [ "$TARGET_USER" = "root" ]; then
-    curl -sL https://raw.githubusercontent.com/nixfred/nixbash/main/install.sh | bash 2>&1
+    bash -c "$NIXBASH_CMD" 2>&1 && NIXBASH_OK=y || NIXBASH_OK=n
 else
-    su - "$TARGET_USER" -c 'curl -sL https://raw.githubusercontent.com/nixfred/nixbash/main/install.sh | bash' 2>&1
+    su - "$TARGET_USER" -c "$NIXBASH_CMD" 2>&1 && NIXBASH_OK=y || NIXBASH_OK=n
 fi
-ok "NixBash shell environment installed for ${TARGET_USER}"
+if [ "$NIXBASH_OK" = "y" ]; then
+    ok "NixBash shell environment installed for ${TARGET_USER}"
+else
+    warn "NixBash install failed -- rerun as ${TARGET_USER}: ${NIXBASH_CMD}"
+fi
 
 # ── Claude Code ───────────────────────────────────────────────────
 if [ "$INSTALL_CLAUDE" = "y" ]; then
@@ -464,9 +478,9 @@ fi
 # ── Cleanup ───────────────────────────────────────────────────────
 next_step "Cleanup"
 info "Removing downloaded package files..."
-apt-get autoclean 2>&1 | tail -1
+(apt-get autoclean 2>&1 || true) | tail -1
 info "Removing unused packages..."
-apt-get autoremove -y 2>&1 | tail -3
+(DEBIAN_FRONTEND=noninteractive apt-get autoremove -y 2>&1 || true) | tail -3
 ok "System cleaned up"
 
 # ── Done ──────────────────────────────────────────────────────────
@@ -490,7 +504,7 @@ echo -e "  ✅ Hostname: ${GREEN}$(hostname)${RESET} | Timezone: ${GREEN}${NEW_T
 [ "$INSTALL_EXTRAS" = "y" ] && echo -e "  ✅ Extra tools installed"
 [ "$INSTALL_DOCKER" = "y" ] && echo -e "  ✅ Docker: ${GREEN}$(docker --version 2>/dev/null | head -1 || echo 'installed')${RESET}"
 [ "$INSTALL_TAILSCALE" = "y" ] && echo -e "  ✅ Tailscale: ${GREEN}$(tailscale ip -4 2>/dev/null || echo 'installed — run tailscale up')${RESET}"
-echo -e "  ✅ NixBash shell environment"
+[ "${NIXBASH_OK:-n}" = "y" ] && echo -e "  ✅ NixBash shell environment" || echo -e "  ⚠️  NixBash shell environment FAILED -- see warning above"
 [ "$INSTALL_CLAUDE" = "y" ] && echo -e "  ✅ Claude Code with aliases"
 echo ""
 [ "$CREATE_USER" = "y" ] && echo -e "  ${BOLD}Connect:${RESET}  ${CYAN}ssh ${NEW_USER}@$(hostname)${RESET}"
