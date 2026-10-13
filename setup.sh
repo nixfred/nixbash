@@ -212,7 +212,7 @@ if ask_yn "Install extras (monitoring, fun, security — 30+ more packages)?" "n
 
 echo ""
 echo -e "${BOLD}── Security & System ──${RESET}"
-if ask_yn "Harden: UFW firewall (SSH only) + key-only SSH (only if a key is installed)?" "y"; then HARDEN="y"; else HARDEN="n"; fi
+if ask_yn "Harden: UFW firewall (SSH ports always allowed; key-only SSH offered later, tested first)?" "y"; then HARDEN="y"; else HARDEN="n"; fi
 if ask_yn "System basics: swap file if none, en_US.UTF-8 locale, clock sync?" "y"; then SYS_BASICS="y"; else SYS_BASICS="n"; fi
 
 GIT_NAME=""; GIT_EMAIL=""
@@ -452,34 +452,70 @@ if [ "$SYS_BASICS" = "y" ]; then
 fi
 
 # ── Hardening ─────────────────────────────────────────────────────
+# LOCKOUT RULES: the firewall always allows every port sshd listens on, and
+# password login is only switched off after the person proves, from a second
+# terminal, that key login works. Anything short of an explicit "yes" reverts,
+# and a timer reverts on its own if this session dies mid-test.
 if [ "$HARDEN" = "y" ]; then
     next_step "Firewall & SSH Hardening"
     DEBIAN_FRONTEND=noninteractive apt-get install -y ufw openssh-server 2>&1 | grep -E "^(Setting up|is already)" || true
+    mkdir -p /run/sshd
+
+    # Every port sshd really listens on (custom ports included), plus 22 as a floor
+    SSH_PORTS=$( { sshd -T 2>/dev/null | awk '$1 == "port" {print $2}'; echo 22; } | sort -un | tr '\n' ' ')
     if command -v ufw >/dev/null 2>&1; then
-        ufw allow OpenSSH >/dev/null 2>&1 || ufw allow 22/tcp >/dev/null 2>&1 || true
+        for port in $SSH_PORTS; do
+            ufw allow "${port}/tcp" >/dev/null 2>&1 || true
+        done
         if [ "$INSTALL_TAILSCALE" = "y" ]; then ufw allow in on tailscale0 >/dev/null 2>&1 || true; fi
-        if ufw --force enable >/dev/null 2>&1; then
-            ok "UFW firewall on: SSH allowed$([ "$INSTALL_TAILSCALE" = "y" ] && echo ", tailscale0 allowed"), everything else inbound denied"
+        # Belt and braces: refuse to enable if the SSH allow rules did not land
+        if ! ufw show added 2>/dev/null | grep -q "allow 22/tcp"; then
+            warn "Could not add the SSH allow rule -- NOT enabling the firewall"
+        elif ufw --force enable >/dev/null 2>&1; then
+            ok "UFW firewall on: SSH allowed on port(s) ${SSH_PORTS}$([ "$INSTALL_TAILSCALE" = "y" ] && echo "+ tailscale0"), other inbound denied"
             if [ "$INSTALL_DOCKER" = "y" ]; then info "Note: Docker-published ports bypass UFW -- bind containers to 127.0.0.1 unless meant to be public"; fi
         else
             warn "Could not enable UFW (container/kernel?) -- skipped"
         fi
     fi
-    # Key-only SSH, but ONLY when a key is really installed, so nobody is locked out.
-    if [ -s "${TARGET_HOME}/.ssh/authorized_keys" ] && [ -d /etc/ssh/sshd_config.d ]; then
-        # 10- sorts before cloud-init's 50-, and sshd uses the first value it sees
-        printf '%s\n' "# NixBash setup: key-only SSH" "PasswordAuthentication no" \
-            "KbdInteractiveAuthentication no" "PermitRootLogin prohibit-password" > /etc/ssh/sshd_config.d/10-nixbash.conf
-        mkdir -p /run/sshd
-        if sshd -t 2>/dev/null; then
-            systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
-            ok "SSH: password login OFF, root login key-only (key found for ${TARGET_USER})"
+
+    # Key-only SSH: opt-in, tested live, auto-reverted unless confirmed.
+    HARDEN_CONF=/etc/ssh/sshd_config.d/10-nixbash.conf
+    if [ ! -s "${TARGET_HOME}/.ssh/authorized_keys" ]; then
+        warn "No SSH key for ${TARGET_USER} -- password login stays ON (nothing to lock you out)"
+    elif [ ! -d /etc/ssh/sshd_config.d ]; then
+        warn "sshd has no config.d directory -- password login stays ON"
+    elif ask_yn "Turn OFF SSH password login? (you will test key login first; anything but 'y' keeps passwords)" "n"; then
+        # 10- sorts before cloud-init's 50-, and sshd uses the first value it sees.
+        # PermitRootLogin is left alone: root keeps whatever login it has today.
+        printf '%s\n' "# NixBash setup: key-only SSH (delete this file + reload ssh to undo)" \
+            "PasswordAuthentication no" "KbdInteractiveAuthentication no" > "$HARDEN_CONF"
+        if ! sshd -t 2>/dev/null; then
+            rm -f "$HARDEN_CONF"
+            warn "sshd rejected the config -- reverted, password login stays ON"
         else
-            rm -f /etc/ssh/sshd_config.d/10-nixbash.conf
-            warn "sshd rejected the hardening config -- reverted, SSH unchanged"
+            # Dead-man switch: undo in 10 minutes unless confirmed below
+            REVERT_UNIT="nixbash-ssh-revert"
+            systemd-run --unit="$REVERT_UNIT" --on-active=600 /bin/sh -c \
+                "rm -f $HARDEN_CONF; systemctl reload ssh || systemctl reload sshd" >/dev/null 2>&1 || true
+            systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
+            echo ""
+            echo -e "  ${BOLD}${YELLOW}TEST NOW -- do not close this window.${RESET}"
+            echo -e "  From your own computer, in a NEW terminal:  ${CYAN}ssh ${TARGET_USER}@$(hostname -I 2>/dev/null | awk '{print $1}')${RESET}"
+            echo -e "  It must log in WITHOUT asking for a password."
+            echo -e "  ${DIM}Safety net: this change undoes itself in 10 minutes unless you confirm.${RESET}"
+            if ask_yn "Did key login work from the new terminal? (y = keep, anything else = undo)" "n"; then
+                systemctl stop "${REVERT_UNIT}.timer" "${REVERT_UNIT}.service" 2>/dev/null || true
+                ok "Key-only SSH kept -- password login OFF (undo: sudo rm ${HARDEN_CONF} && sudo systemctl reload ssh)"
+            else
+                systemctl stop "${REVERT_UNIT}.timer" "${REVERT_UNIT}.service" 2>/dev/null || true
+                rm -f "$HARDEN_CONF"
+                systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
+                warn "Reverted -- password login is ON again. Fix the key, then rerun setup."
+            fi
         fi
     else
-        warn "No SSH key in ${TARGET_HOME}/.ssh/authorized_keys -- leaving password login ON so you are not locked out"
+        info "Password login left ON (your choice)"
     fi
 fi
 
